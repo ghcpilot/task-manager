@@ -149,8 +149,8 @@ export default function TaskDetailPage() {
           <Button
             variant="default"
             onClick={() => router.push('/dashboard/tasks')}
-            icon={<ArrowLeft className="h-4 w-4" />}
           >
+            <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Tasks
           </Button>
         </div>
@@ -210,7 +210,7 @@ export default function TaskDetailPage() {
               <div className="flex flex-col items-center mb-4">
                 <h3 className="text-lg font-semibold text-white mb-2">{timerDisplay}</h3>
                 <Button
-                  variant={isTimerRunning ? "success" : "secondary"}
+                  variant={isTimerRunning ? "destructive" : "secondary"}
                   size="sm"
                   onClick={toggleTimer}
                   className="w-full"
@@ -261,9 +261,9 @@ export default function TaskDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
-                icon={<Plus className="h-4 w-4" />}
                 onClick={logTime}
               >
+                <Plus className="h-4 w-4 mr-2" />
                 Log Time
               </Button>
             </div>
@@ -285,8 +285,8 @@ export default function TaskDetailPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  icon={<Plus className="h-4 w-4" />}
                 >
+                  <Plus className="h-4 w-4 mr-2" />
                   Add Attachment
                 </Button>
               </div>

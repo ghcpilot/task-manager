@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getAuthUser } from '@/lib/auth';
 import { z } from 'zod';
+import { 
+  getProjectById, 
+  updateProject, 
+  deleteProject,
+  getTasksByProject 
+} from '@/lib/firebaseService';
+import { getAuthUser } from '@/lib/serverAuth';
 
 // Schema for project validation
 const projectUpdateSchema = z.object({
@@ -10,40 +15,29 @@ const projectUpdateSchema = z.object({
   color: z.string().min(1, 'Color is required').optional(),
 });
 
-// GET /api/projects/[id] - Get project by ID
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+// GET /api/projects/[id] - Get a specific project
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    // Store ID in a local variable first
-    const id = params.id;
-    const user = await getAuthUser();
+    const { id } = await params;
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
-    const project = await prisma.project.findUnique({
-      where: { 
-        id: id,
-        userId: user.id
-      },
-      include: {
-        tasks: {
-          orderBy: { updatedAt: 'desc' }
-        }
-      }
-    });
+    const project = await getProjectById(id);
     
-    if (!project) {
-      return NextResponse.json(
-        { message: 'Project not found' },
-        { status: 404 }
-      );
+    if (!project || project.userId !== user.id) {
+      return NextResponse.json({ message: 'Project not found' }, { status: 404 });
     }
     
-    return NextResponse.json(project);
+    // Get tasks for this project
+    const tasks = await getTasksByProject(id);
+    
+    return NextResponse.json({
+      ...project,
+      tasks
+    });
   } catch (error) {
     console.error('Error fetching project:', error);
     return NextResponse.json(
@@ -53,44 +47,28 @@ export async function GET(
   }
 }
 
-// PATCH /api/projects/[id] - Update project
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+// PATCH /api/projects/[id] - Update a specific project
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    // Store ID in a local variable first
-    const id = params.id;
-    const user = await getAuthUser();
+    const { id } = await params;
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
-    // Check if project exists and belongs to user
-    const existingProject = await prisma.project.findUnique({
-      where: { 
-        id: id,
-        userId: user.id
-      }
-    });
+    const project = await getProjectById(id);
     
-    if (!existingProject) {
-      return NextResponse.json(
-        { message: 'Project not found' },
-        { status: 404 }
-      );
+    if (!project || project.userId !== user.id) {
+      return NextResponse.json({ message: 'Project not found' }, { status: 404 });
     }
     
     const body = await request.json();
     const validatedData = projectUpdateSchema.parse(body);
     
-    const updatedProject = await prisma.project.update({
-      where: { id: id },
-      data: validatedData
-    });
+    await updateProject(id, validatedData);
     
-    return NextResponse.json(updatedProject);
+    return NextResponse.json({ message: 'Project updated successfully' });
   } catch (error) {
     console.error('Error updating project:', error);
     if (error instanceof z.ZodError) {
@@ -106,43 +84,25 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/projects/[id] - Delete project
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+// DELETE /api/projects/[id] - Delete a specific project
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    // Store ID in a local variable first
-    const id = params.id;
-    const user = await getAuthUser();
+    const { id } = await params;
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
-    // Check if project exists and belongs to user
-    const existingProject = await prisma.project.findUnique({
-      where: { 
-        id: id,
-        userId: user.id
-      }
-    });
+    const project = await getProjectById(id);
     
-    if (!existingProject) {
-      return NextResponse.json(
-        { message: 'Project not found' },
-        { status: 404 }
-      );
+    if (!project || project.userId !== user.id) {
+      return NextResponse.json({ message: 'Project not found' }, { status: 404 });
     }
     
-    await prisma.project.delete({
-      where: { id: id }
-    });
+    await deleteProject(id);
     
-    return NextResponse.json(
-      { message: 'Project deleted successfully' },
-      { status: 200 }
-    );
+    return NextResponse.json({ message: 'Project deleted successfully' });
   } catch (error) {
     console.error('Error deleting project:', error);
     return NextResponse.json(
@@ -150,4 +110,4 @@ export async function DELETE(
       { status: 500 }
     );
   }
-} 
+}

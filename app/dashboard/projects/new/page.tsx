@@ -3,18 +3,19 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Calendar } from 'lucide-react';
 import Button from '@/app/components/ui/Button';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useApi } from '@/lib/hooks/useApi';
 
 const projectSchema = z.object({
   name: z.string().min(1, 'Project name is required'),
   description: z.string().optional(),
-  color: z.string().min(1, 'Color is required'),
+  deadline: z.string().optional(),
 });
 
 type ProjectFormData = z.infer<typeof projectSchema>;
@@ -22,6 +23,7 @@ type ProjectFormData = z.infer<typeof projectSchema>;
 export default function NewProjectPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
+  const api = useApi();
   
   const {
     register,
@@ -32,7 +34,7 @@ export default function NewProjectPage() {
     defaultValues: {
       name: '',
       description: '',
-      color: '#ffffff' // Fixed white color
+      deadline: ''
     }
   });
   
@@ -40,22 +42,16 @@ export default function NewProjectPage() {
     try {
       setIsSubmitting(true);
       
-      const response = await fetch('/api/projects', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
+      const projectData = {
+        ...data,
+        status: 'active' as const,
+        color: '#8b5cf6', // Default purple color
+        deadline: data.deadline ? new Date(data.deadline).toISOString() : undefined
+      };
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to create project');
-      }
-      
-      const project = await response.json();
+      const project = await api.post('/api/projects', projectData);
       toast.success('Project created successfully');
-      router.push(`/dashboard/projects/${project.id}`);
+      router.push(`/dashboard/projects`);
     } catch (error) {
       console.error('Error creating project:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to create project');
@@ -63,121 +59,129 @@ export default function NewProjectPage() {
       setIsSubmitting(false);
     }
   };
-  
-  // Animation variants
-  const container = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
-    }
-  };
-  
-  const item = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
-  };
-  
+
   return (
-    <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
-      <motion.div
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="max-w-2xl mx-auto"
-      >
-        {/* Header section */}
+    <main className="flex-1 p-4 md:p-6 lg:p-8">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
         <div className="mb-8">
-          <Link href="/dashboard/projects">
-            <motion.div
-              variants={item}
-              className="flex items-center text-gray-400 hover:text-white mb-4"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              <span>Back to Projects</span>
-            </motion.div>
+          <Link 
+            href="/dashboard/projects"
+            className="inline-flex items-center text-gray-400 hover:text-white transition-colors mb-6"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Projects
           </Link>
           
-          <motion.h1 
-            variants={item}
-            className="text-2xl md:text-3xl font-bold text-white"
-          >
-            Create New Project
-          </motion.h1>
-          <motion.p 
-            variants={item}
-            className="text-gray-400 mt-1"
-          >
-            Fill in the details below to create a new project
-          </motion.p>
+          <h1 className="text-3xl font-bold text-white mb-2">Create New Project</h1>
+          <p className="text-gray-400">Start organizing your tasks with a new project.</p>
         </div>
-        
+
         {/* Form */}
-        <motion.form 
-          variants={item}
-          onSubmit={handleSubmit(onSubmit)}
-          className="glass-card rounded-xl p-6 border border-white/20"
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="bg-[#1a1a1a] border border-white/10 rounded-xl p-8"
         >
-          {/* Project Name */}
-          <div className="mb-6">
-            <label 
-              htmlFor="name"
-              className="block text-sm font-medium text-white mb-1"
-            >
-              Project Name
-            </label>
-            <input
-              id="name"
-              {...register('name')}
-              className="bg-[#1e1e1e]/80 w-full rounded-md px-4 py-3 text-sm border border-white/20 focus:outline-none focus:ring-1 focus:ring-white/50 text-white"
-              placeholder="Enter project name"
-            />
-            {errors.name && (
-              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                <span className="text-red-400 text-xs">●</span> {errors.name.message}
-              </p>
-            )}
-          </div>
-          
-          {/* Description */}
-          <div className="mb-6">
-            <label 
-              htmlFor="description"
-              className="block text-sm font-medium text-white mb-1"
-            >
-              Description (Optional)
-            </label>
-            <textarea
-              id="description"
-              {...register('description')}
-              className="bg-[#1e1e1e]/80 w-full rounded-md px-4 py-3 text-sm border border-white/20 focus:outline-none focus:ring-1 focus:ring-white/50 text-white resize-none"
-              placeholder="Enter project description"
-              rows={4}
-            />
-          </div>
-          
-          {/* Hidden color field - using fixed white */}
-          <input type="hidden" {...register('color')} value="#ffffff" />
-          
-          {/* Submit Button */}
-          <div className="flex justify-end">
-            <Button 
-              type="submit" 
-              variant="default" 
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : 'Create Project'}
-            </Button>
-          </div>
-        </motion.form>
-      </motion.div>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {/* Project Name */}
+            <div>
+              <label 
+                htmlFor="name"
+                className="block text-sm font-medium text-white mb-2"
+              >
+                Project Name *
+              </label>
+              <input
+                id="name"
+                type="text"
+                {...register('name')}
+                className="bg-[#1e1e1e]/80 w-full rounded-md px-4 py-3 text-sm border border-white/20 focus:outline-none focus:ring-1 focus:ring-white/50 text-white"
+                placeholder="Enter project name"
+              />
+              {errors.name && (
+                <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                  <span className="text-red-400 text-xs">●</span> {errors.name.message}
+                </p>
+              )}
+            </div>
+
+            {/* Project Description */}
+            <div>
+              <label 
+                htmlFor="description"
+                className="block text-sm font-medium text-white mb-2"
+              >
+                Description (Optional)
+              </label>
+              <textarea
+                id="description"
+                {...register('description')}
+                rows={4}
+                className="bg-[#1e1e1e]/80 w-full rounded-md px-4 py-3 text-sm border border-white/20 focus:outline-none focus:ring-1 focus:ring-white/50 text-white resize-none"
+                placeholder="Describe your project goals and objectives"
+              />
+              {errors.description && (
+                <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                  <span className="text-red-400 text-xs">●</span> {errors.description.message}
+                </p>
+              )}
+            </div>
+
+            {/* Deadline */}
+            <div>
+              <label 
+                htmlFor="deadline"
+                className="block text-sm font-medium text-white mb-2"
+              >
+                Deadline (Optional)
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Calendar className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="deadline"
+                  type="date"
+                  {...register('deadline')}
+                  className="bg-[#1e1e1e]/80 w-full rounded-md pl-10 pr-4 py-3 text-sm border border-white/20 focus:outline-none focus:ring-1 focus:ring-white/50 text-white"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              {errors.deadline && (
+                <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                  <span className="text-red-400 text-xs">●</span> {errors.deadline.message}
+                </p>
+              )}
+            </div>
+            
+            {/* Submit Button */}
+            <div className="flex items-center gap-4 pt-4">
+              <Button
+                type="submit"
+                isLoading={isSubmitting}
+                className="flex-1"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating Project...
+                  </>
+                ) : (
+                  'Create Project'
+                )}
+              </Button>
+              
+              <Link href="/dashboard/projects">
+                <Button variant="outline" type="button">
+                  Cancel
+                </Button>
+              </Link>
+            </div>
+          </form>
+        </motion.div>
+      </div>
     </main>
   );
 } 

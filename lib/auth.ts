@@ -1,3 +1,5 @@
+import { auth } from './firebase';
+
 // Auth utility functions
 export interface AuthUser {
   id: string;
@@ -6,50 +8,80 @@ export interface AuthUser {
   role: string;
 }
 
-export interface Session {
-  user: AuthUser | null;
-  expires: Date;
-}
-
-// Get the current session data
-export async function getSession(): Promise<Session | null> {
+// Helper function to get user from Firebase Auth (client-side only)
+export async function getAuthUser() {
   try {
-    const response = await fetch('/api/auth/session');
-    
-    if (!response.ok) {
+    const user = auth.currentUser;
+    if (!user) {
       return null;
     }
     
-    const data = await response.json();
-    return data;
+    return {
+      id: user.uid,
+      name: user.displayName || 'User',
+      email: user.email || '',
+      role: 'user'
+    };
   } catch (error) {
-    console.error('Failed to get session:', error);
+    console.error('Auth error:', error);
     return null;
   }
 }
 
-// Check if user is authenticated
-export async function isAuthenticated(): Promise<boolean> {
-  const session = await getSession();
-  return !!session?.user;
-}
-
-// Get the current user
-export async function getCurrentUser(): Promise<AuthUser | null> {
-  const session = await getSession();
-  return session?.user || null;
-}
-
-// Sign out the user
-export async function signOut(): Promise<boolean> {
+// Get Firebase ID token for API requests
+export async function getIdToken(): Promise<string | null> {
   try {
-    const response = await fetch('/api/auth/signout', {
-      method: 'POST',
-    });
+    const user = auth.currentUser;
+    if (!user) {
+      return null;
+    }
     
-    return response.ok;
+    return await user.getIdToken();
   } catch (error) {
-    console.error('Failed to sign out:', error);
-    return false;
+    console.error('Failed to get ID token:', error);
+    return null;
+  }
+}
+
+// Enhanced authenticated fetch function
+export async function authenticatedFetch(url: string, options: RequestInit = {}) {
+  const token = await getIdToken();
+  
+  if (!token) {
+    throw new Error('No authentication token available');
+  }
+  
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+    ...options.headers,
+  };
+  
+  return fetch(url, {
+    ...options,
+    headers,
+  });
+}
+
+// Session management functions (client-side)
+export async function getSession() {
+  return getAuthUser();
+}
+
+export async function isAuthenticated(): Promise<boolean> {
+  const user = await getAuthUser();
+  return user !== null;
+}
+
+export async function getCurrentUser() {
+  return getAuthUser();
+}
+
+export async function signOut() {
+  try {
+    await auth.signOut();
+  } catch (error) {
+    console.error('Sign out error:', error);
+    throw error;
   }
 } 

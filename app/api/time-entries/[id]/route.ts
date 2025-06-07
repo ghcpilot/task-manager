@@ -1,73 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getAuthUser } from '@/lib/auth';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { 
+  getTimeEntryById,
+  updateTimeEntry,
+  deleteTimeEntry,
+  getProjectById,
+  getTasks
+} from '@/lib/firebaseService';
+import { getAuthUser } from '@/lib/serverAuth';
+import { Timestamp } from 'firebase/firestore';
 
 // Schema for time entry update validation
 const timeEntryUpdateSchema = z.object({
   description: z.string().optional(),
-  startTime: z.string().optional().transform(val => val ? new Date(val) : undefined),
-  endTime: z.string().optional().transform(val => val ? new Date(val) : undefined),
+  startTime: z.string().optional().transform(val => val ? Timestamp.fromDate(new Date(val)) : undefined),
+  endTime: z.string().optional().transform(val => val ? Timestamp.fromDate(new Date(val)) : undefined),
   duration: z.number().optional(),
   isRunning: z.boolean().optional(),
   projectId: z.string().optional(),
   taskId: z.string().optional().nullable()
 });
 
-// Work around TypeScript not recognizing the new model
-// This is safe because we've already run the migration and generated the client
-const prismaWithTimeEntry = prisma as PrismaClient & {
-  timeEntry: any
-};
-
 // GET /api/time-entries/[id] - Get a time entry by ID
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
-    const user = await getAuthUser();
+    const { id } = await params;
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
-    const timeEntry = await prismaWithTimeEntry.timeEntry.findUnique({
-      where: { id },
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-            color: true,
-            userId: true
-          }
-        },
-        task: {
-          select: {
-            id: true,
-            title: true,
-            status: true
-          }
-        }
-      }
-    });
+    const timeEntry = await getTimeEntryById(id);
     
-    if (!timeEntry) {
-      return NextResponse.json(
-        { message: 'Time entry not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Verify that the time entry belongs to the authenticated user
-    if (timeEntry.userId !== user.id) {
-      return NextResponse.json(
-        { message: 'Unauthorized' },
-        { status: 401 }
-      );
+    if (!timeEntry || timeEntry.userId !== user.id) {
+      return NextResponse.json({ message: 'Time entry not found' }, { status: 404 });
     }
     
     return NextResponse.json(timeEntry);
@@ -83,25 +53,18 @@ export async function GET(
 // PUT /api/time-entries/[id] - Update a time entry
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
-    const user = await getAuthUser();
+    const { id } = await params;
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
     // Check if time entry exists and belongs to user
-    const existingEntry = await prismaWithTimeEntry.timeEntry.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        userId: true,
-        projectId: true
-      }
-    });
+    const existingEntry = await getTimeEntryById(id);
     
     if (!existingEntry) {
       return NextResponse.json(
@@ -123,14 +86,9 @@ export async function PUT(
     
     // If projectId is changing, verify the new project belongs to user
     if (validatedData.projectId && validatedData.projectId !== existingEntry.projectId) {
-      const project = await prisma.project.findUnique({
-        where: {
-          id: validatedData.projectId,
-          userId: user.id
-        }
-      });
+      const project = await getProjectById(validatedData.projectId);
       
-      if (!project) {
+      if (!project || project.userId !== user.id) {
         return NextResponse.json(
           { message: 'Project not found or not owned by user' },
           { status: 404 }
@@ -138,20 +96,14 @@ export async function PUT(
       }
     }
     
-    // If taskId is provided, verify it belongs to the project
+    // If taskId is provided, verify it belongs to the user
     if (validatedData.taskId) {
-      const projectId = validatedData.projectId || existingEntry.projectId;
-      
-      const task = await prisma.task.findUnique({
-        where: {
-          id: validatedData.taskId,
-          projectId
-        }
-      });
+      const tasks = await getTasks(user.id);
+      const task = tasks.find(t => t.id === validatedData.taskId);
       
       if (!task) {
         return NextResponse.json(
-          { message: 'Task not found or does not belong to the project' },
+          { message: 'Task not found or does not belong to user' },
           { status: 404 }
         );
       }
@@ -160,7 +112,7 @@ export async function PUT(
     // Calculate duration if both start and end times are provided
     let duration = validatedData.duration;
     if (validatedData.startTime && validatedData.endTime && !duration) {
-      duration = Math.floor((validatedData.endTime.getTime() - validatedData.startTime.getTime()) / 1000);
+      duration = Math.floor((validatedData.endTime.toDate().getTime() - validatedData.startTime.toDate().getTime()) / 1000);
     }
     
     const updateData: any = {
@@ -170,39 +122,18 @@ export async function PUT(
     
     // Stopping a timer
     if (validatedData.isRunning === false && !validatedData.endTime) {
-      updateData.endTime = new Date();
+      updateData.endTime = Timestamp.now();
       
       // Calculate and update duration
-      const timeEntry = await prismaWithTimeEntry.timeEntry.findUnique({
-        where: { id },
-        select: { startTime: true }
-      });
-      
-      if (timeEntry && timeEntry.startTime) {
-        updateData.duration = Math.floor((updateData.endTime.getTime() - timeEntry.startTime.getTime()) / 1000);
+      if (existingEntry.startTime) {
+        updateData.duration = Math.floor((updateData.endTime.toDate().getTime() - existingEntry.startTime.toDate().getTime()) / 1000);
       }
     }
     
-    const updatedTimeEntry = await prismaWithTimeEntry.timeEntry.update({
-      where: { id },
-      data: updateData,
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-            color: true
-          }
-        },
-        task: {
-          select: {
-            id: true,
-            title: true,
-            status: true
-          }
-        }
-      }
-    });
+    await updateTimeEntry(id, updateData);
+    
+    // Get updated time entry
+    const updatedTimeEntry = await getTimeEntryById(id);
     
     return NextResponse.json(updatedTimeEntry);
   } catch (error) {
@@ -223,40 +154,39 @@ export async function PUT(
 // DELETE /api/time-entries/[id] - Delete a time entry
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
-    const user = await getAuthUser();
+    const { id } = await params;
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
     // Check if time entry exists and belongs to user
-    const timeEntry = await prismaWithTimeEntry.timeEntry.findUnique({
-      where: { id },
-      select: { id: true, userId: true }
-    });
+    const existingEntry = await getTimeEntryById(id);
     
-    if (!timeEntry) {
+    if (!existingEntry) {
       return NextResponse.json(
         { message: 'Time entry not found' },
         { status: 404 }
       );
     }
     
-    if (timeEntry.userId !== user.id) {
+    if (existingEntry.userId !== user.id) {
       return NextResponse.json(
         { message: 'Unauthorized' },
         { status: 401 }
       );
     }
     
-    // Delete the time entry
-    await prismaWithTimeEntry.timeEntry.delete({ where: { id } });
+    await deleteTimeEntry(id);
     
-    return NextResponse.json({ message: 'Time entry deleted successfully' });
+    return NextResponse.json(
+      { message: 'Time entry deleted successfully' },
+      { status: 200 }
+    );
   } catch (error) {
     console.error('Error deleting time entry:', error);
     return NextResponse.json(

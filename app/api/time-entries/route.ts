@@ -1,88 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { getAuthUser } from '@/lib/auth';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { 
+  createTimeEntry, 
+  getTimeEntries, 
+  getProjectById,
+  getTasks
+} from '@/lib/firebaseService';
+import { getAuthUser } from '@/lib/serverAuth';
+import { Timestamp } from 'firebase/firestore';
 
 // Schema for time entry validation
 const timeEntrySchema = z.object({
   description: z.string().optional(),
-  startTime: z.string().transform(val => new Date(val)),
-  endTime: z.string().optional().transform(val => val ? new Date(val) : undefined),
+  startTime: z.string().transform(val => Timestamp.fromDate(new Date(val))),
+  endTime: z.string().optional().transform(val => val ? Timestamp.fromDate(new Date(val)) : undefined),
   duration: z.number().optional(),
   isRunning: z.boolean().default(false),
   projectId: z.string(),
   taskId: z.string().optional()
 });
 
-// Work around TypeScript not recognizing the new model
-// This is safe because we've already run the migration and generated the client
-const prismaWithTimeEntry = prisma as PrismaClient & {
-  timeEntry: any
-};
-
-// GET /api/time-entries - Get all time entries for the current user
+// GET /api/time-entries - Get all time entries for the authenticated user
 export async function GET(request: NextRequest) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
     
-    // Parse query parameters
-    const url = new URL(request.url);
-    const projectId = url.searchParams.get('projectId');
-    const taskId = url.searchParams.get('taskId');
-    const startDate = url.searchParams.get('startDate');
-    const endDate = url.searchParams.get('endDate');
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('projectId');
+    const taskId = searchParams.get('taskId');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
     
-    // Build filter conditions
-    const whereClause: any = { userId: user.id };
+    const filters: any = {};
+    if (projectId) filters.projectId = projectId;
+    if (taskId) filters.taskId = taskId;
+    if (startDate) filters.startDate = new Date(startDate);
+    if (endDate) filters.endDate = new Date(endDate);
     
-    if (projectId) {
-      whereClause.projectId = projectId;
-    }
-    
-    if (taskId) {
-      whereClause.taskId = taskId;
-    }
-    
-    // Date filtering
-    if (startDate || endDate) {
-      whereClause.startTime = {};
-      
-      if (startDate) {
-        whereClause.startTime.gte = new Date(startDate);
-      }
-      
-      if (endDate) {
-        whereClause.startTime.lte = new Date(endDate);
-      }
-    }
-    
-    const timeEntries = await prismaWithTimeEntry.timeEntry.findMany({
-      where: whereClause,
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-            color: true
-          }
-        },
-        task: {
-          select: {
-            id: true,
-            title: true,
-            status: true
-          }
-        }
-      },
-      orderBy: {
-        startTime: 'desc'
-      }
-    });
+    const timeEntries = await getTimeEntries(user.id, filters);
     
     return NextResponse.json(timeEntries);
   } catch (error) {
@@ -97,7 +56,7 @@ export async function GET(request: NextRequest) {
 // POST /api/time-entries - Create a new time entry
 export async function POST(request: NextRequest) {
   try {
-    const user = await getAuthUser();
+    const user = await getAuthUser(request);
     
     if (!user) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
@@ -106,71 +65,24 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validatedData = timeEntrySchema.parse(body);
     
-    // Verify project belongs to user
-    const project = await prisma.project.findUnique({
-      where: {
-        id: validatedData.projectId,
-        userId: user.id
-      }
-    });
-    
-    if (!project) {
-      return NextResponse.json(
-        { message: 'Project not found or not owned by user' },
-        { status: 404 }
-      );
+    // Verify project exists and belongs to user
+    const project = await getProjectById(validatedData.projectId);
+    if (!project || project.userId !== user.id) {
+      return NextResponse.json({ message: 'Project not found' }, { status: 404 });
     }
     
-    // If taskId is provided, verify it belongs to the specified project
+    // If taskId is provided, verify it exists and belongs to the project
     if (validatedData.taskId) {
-      const task = await prisma.task.findUnique({
-        where: {
-          id: validatedData.taskId,
-          projectId: validatedData.projectId
-        }
-      });
-      
+      const tasks = await getTasks(user.id, validatedData.projectId);
+      const task = tasks.find(t => t.id === validatedData.taskId);
       if (!task) {
-        return NextResponse.json(
-          { message: 'Task not found or does not belong to the specified project' },
-          { status: 404 }
-        );
+        return NextResponse.json({ message: 'Task not found' }, { status: 404 });
       }
     }
     
-    // Calculate duration if both start and end times are provided
-    let duration = validatedData.duration;
-    if (validatedData.startTime && validatedData.endTime && !duration) {
-      duration = Math.floor((validatedData.endTime.getTime() - validatedData.startTime.getTime()) / 1000);
-    }
-    
-    const timeEntry = await prismaWithTimeEntry.timeEntry.create({
-      data: {
-        description: validatedData.description,
-        startTime: validatedData.startTime,
-        endTime: validatedData.endTime,
-        duration,
-        isRunning: validatedData.isRunning,
-        userId: user.id,
-        projectId: validatedData.projectId,
-        taskId: validatedData.taskId
-      },
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-            color: true
-          }
-        },
-        task: {
-          select: {
-            id: true,
-            title: true,
-            status: true
-          }
-        }
-      }
+    const timeEntry = await createTimeEntry({
+      ...validatedData,
+      userId: user.id
     });
     
     return NextResponse.json(timeEntry, { status: 201 });

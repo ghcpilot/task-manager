@@ -2,417 +2,509 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, List, Grid, Info, MoreHorizontal, Filter, Plus, Clock } from 'lucide-react';
-import TaskCalendar from '@/app/components/ui/TaskCalendar';
-import Button from '@/app/components/ui/Button';
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  Plus, 
+  Filter,
+  Calendar as CalendarIcon,
+  Clock,
+  X,
+  Save
+} from 'lucide-react';
+import Button from '@/components/ui/Button';
 import { toast } from 'react-hot-toast';
-import TaskForm from '@/app/components/ui/TaskForm';
+import { useAuth } from '@/app/contexts/AuthContext';
+import { useApi } from '@/lib/hooks/useApi';
 
-// Task interface matching the one in TaskCalendar
 interface Task {
   id: string;
   title: string;
   date: string; // ISO format: YYYY-MM-DD
-  time?: string;
   status: 'completed' | 'in_progress' | 'pending' | 'overdue';
   description?: string;
   priority?: 'low' | 'medium' | 'high';
   projectId?: string;
+  projectName?: string;
+  color?: string;
 }
 
-// Test data for tasks
-const DUMMY_TASKS: Task[] = [
-  {
-    id: '1',
-    title: 'Team meeting',
-    date: new Date().toISOString().split('T')[0], // Today
-    time: '10:00',
-    status: 'pending',
-    description: 'Weekly team sync with product and design'
-  },
-  {
-    id: '2',
-    title: 'Client call',
-    date: new Date().toISOString().split('T')[0], // Today
-    time: '14:30',
-    status: 'pending',
-    description: 'Discuss project requirements'
-  },
-  {
-    id: '3',
-    title: 'Design review',
-    date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
-    time: '11:00',
-    status: 'pending',
-    description: 'Review homepage mockups'
-  },
-  {
-    id: '4',
-    title: 'Submit proposal',
-    date: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0], // Day after tomorrow
-    time: '15:00',
-    status: 'pending',
-    description: 'Complete project proposal and send to client'
-  },
-  {
-    id: '5',
-    title: 'Finalize budget',
-    date: new Date(Date.now() - 86400000).toISOString().split('T')[0], // Yesterday
-    time: '09:30',
-    status: 'completed',
-    description: 'Review and approve project budget'
-  },
-  {
-    id: '6',
-    title: 'Technical planning',
-    date: new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0], // 2 days ago
-    time: '13:00',
-    status: 'completed',
-    description: 'Define technical architecture'
-  },
-  {
-    id: '7',
-    title: 'Project deadline',
-    date: new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0], // 10 days from now
-    time: '17:00',
-    status: 'overdue',
-    description: 'Final project delivery'
-  },
-];
+interface Project {
+  id: string;
+  name: string;
+  color: string;
+}
 
-// Generate more tasks for the calendar
-const generateMoreTasks = (): Task[] => {
-  const tasks = [...DUMMY_TASKS];
+export default function CalendarPage() {
+  const { user, isAuthenticated } = useAuth();
+  const api = useApi();
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>('all');
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [newTask, setNewTask] = useState({
+    title: '',
+    description: '',
+    priority: 'medium' as 'low' | 'medium' | 'high',
+    projectId: ''
+  });
+
+  // Load tasks and projects from Firebase
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      loadData();
+    }
+  }, [isAuthenticated, user]);
+
+  const loadData = async () => {
+    if (!user) return;
+    
+    try {
+      setLoading(true);
+      
+      // Load projects and tasks in parallel
+      const [firebaseProjects, firebaseTasks] = await Promise.all([
+        api.get('/api/projects'),
+        api.get('/api/tasks')
+      ]);
+      
+      // Convert Firebase projects to local format
+      const convertedProjects: Project[] = [
+        { id: 'all', name: 'All Projects', color: '#6366f1' },
+        ...firebaseProjects.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          color: p.color
+        }))
+      ];
+      setProjects(convertedProjects);
+      
+      // Set default project if none selected and projects exist
+      if (!newTask.projectId && firebaseProjects.length > 0) {
+        setNewTask(prev => ({ ...prev, projectId: firebaseProjects[0].id }));
+      }
+      
+      // Convert Firebase tasks to local format
+      const convertedTasks: Task[] = firebaseTasks.map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        date: t.dueDate ? new Date(t.dueDate.seconds * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        status: t.status,
+        priority: t.priority,
+        projectId: t.projectId,
+        projectName: firebaseProjects.find((p: any) => p.id === t.projectId)?.name || 'Unknown Project',
+        color: firebaseProjects.find((p: any) => p.id === t.projectId)?.color || '#6366f1'
+      }));
+      setTasks(convertedTasks);
+      
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast.error('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get calendar data
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
   const today = new Date();
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+  const todayDate = today.getDate();
+
+  // Get first day of month and number of days
+  const firstDayOfMonth = new Date(year, month, 1);
+  const lastDayOfMonth = new Date(year, month + 1, 0);
+  const firstDayWeekday = firstDayOfMonth.getDay();
+  const daysInMonth = lastDayOfMonth.getDate();
+
+  // Get previous month's last days to fill the grid
+  const prevMonth = new Date(year, month - 1, 0);
+  const daysInPrevMonth = prevMonth.getDate();
+
+  // Generate calendar grid
+  const calendarDays = [];
   
-  // Generate 20 random tasks
-  for (let i = 0; i < 20; i++) {
-    const randomDay = Math.floor(Math.random() * 28) + 1;
-    const date = new Date(currentYear, currentMonth, randomDay);
-    
-    // Skip dates that fall outside the current month
-    if (date.getMonth() !== currentMonth) continue;
-    
-    const taskDate = date.toISOString().split('T')[0];
-    const randomHour = Math.floor(Math.random() * 12) + 8;
-    const randomMinute = Math.floor(Math.random() * 4) * 15;
-    const taskTime = `${randomHour.toString().padStart(2, '0')}:${randomMinute.toString().padStart(2, '0')}`;
-    
-    const statusOptions = ['completed', 'in_progress', 'pending', 'overdue'];
-    const randomStatus = statusOptions[Math.floor(Math.random() * statusOptions.length)] as Task['status'];
-    
-    tasks.push({
-      id: `task-${i + 4}`,
-      title: `Task ${i + 1}`,
-      date: taskDate,
-      time: taskTime,
-      status: randomStatus,
-      description: `This is a description for Task ${i + 1}`
+  // Previous month's days
+  for (let i = firstDayWeekday - 1; i >= 0; i--) {
+    calendarDays.push({
+      date: daysInPrevMonth - i,
+      isCurrentMonth: false,
+      isToday: false,
+      fullDate: new Date(year, month - 1, daysInPrevMonth - i)
     });
   }
   
-  return tasks;
-};
+  // Current month's days
+  for (let date = 1; date <= daysInMonth; date++) {
+    calendarDays.push({
+      date,
+      isCurrentMonth: true,
+      isToday: isCurrentMonth && date === todayDate,
+      fullDate: new Date(year, month, date)
+    });
+  }
+  
+  // Next month's days to complete the grid
+  const remainingDays = 42 - calendarDays.length;
+  for (let date = 1; date <= remainingDays; date++) {
+    calendarDays.push({
+      date,
+      isCurrentMonth: false,
+      isToday: false,
+      fullDate: new Date(year, month + 1, date)
+    });
+  }
 
-export default function CalendarPage() {
-  const [darkMode, setDarkMode] = useState(true);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<'calendar' | 'list'>('calendar');
-  const [isAddingTask, setIsAddingTask] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loading, setLoading] = useState(true);
-  
-  // Fetch tasks from local storage (simulating database)
-  useEffect(() => {
-    const fetchTasks = async () => {
-      try {
-        setLoading(true);
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Get tasks from local storage
-        const savedTasks = localStorage.getItem('savedTasks') 
-          ? JSON.parse(localStorage.getItem('savedTasks') || '[]') 
-          : [];
-        
-        if (savedTasks.length > 0) {
-          setTasks(savedTasks);
-        } else {
-          // If no saved tasks, use some sample data
-          const sampleTasks = [
-            {
-              id: '1',
-              title: 'Team meeting',
-              date: new Date().toISOString().split('T')[0], // Today
-              time: '10:00',
-              status: 'pending' as 'pending' | 'in_progress' | 'completed' | 'overdue',
-              description: 'Weekly team sync with product and design',
-              projectId: 'project-1'
-            },
-            {
-              id: '2',
-              title: 'Client call',
-              date: new Date().toISOString().split('T')[0], // Today
-              time: '14:30',
-              status: 'pending' as 'pending' | 'in_progress' | 'completed' | 'overdue',
-              description: 'Discuss project requirements',
-              projectId: 'project-1'
-            },
-            {
-              id: '3',
-              title: 'Design review',
-              date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
-              time: '11:00',
-              status: 'pending' as 'pending' | 'in_progress' | 'completed' | 'overdue',
-              description: 'Review homepage mockups',
-              projectId: 'project-2'
-            }
-          ];
-          setTasks(sampleTasks as Task[]);
-          localStorage.setItem('savedTasks', JSON.stringify(sampleTasks));
-        }
-      } catch (error) {
-        console.error('Error fetching tasks:', error);
-        toast.error('Failed to load tasks');
-      } finally {
-        setLoading(false);
+  // Filter tasks by selected project
+  const filteredTasks = selectedProject === 'all' 
+    ? tasks 
+    : tasks.filter(task => task.projectId === selectedProject);
+
+  // Get tasks for a specific date
+  const getTasksForDate = (date: Date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    return filteredTasks.filter(task => task.date === dateStr);
+  };
+
+  // Navigate months
+  const navigateMonth = (direction: 'prev' | 'next') => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev);
+      if (direction === 'prev') {
+        newDate.setMonth(prev.getMonth() - 1);
+      } else {
+        newDate.setMonth(prev.getMonth() + 1);
       }
-    };
-    
-    fetchTasks();
-  }, []);
-  
-  // Handle date click on calendar
-  const handleDateClick = (date: Date, tasksForDate: Task[]) => {
-    console.log('Date clicked:', date, 'Tasks:', tasksForDate);
-    
-    if (tasksForDate.length > 0) {
-      setSelectedTask(tasksForDate[0]);
-    } else {
-      // Create a new task for this date
-      const newTaskDate = date.toISOString().split('T')[0];
-      setSelectedDate(newTaskDate);
-      setIsAddingTask(true);
+      return newDate;
+    });
+  };
+
+  // Go to today
+  const goToToday = () => {
+    setCurrentDate(new Date());
+  };
+
+  // Handle date click
+  const handleDateClick = (day: any) => {
+    if (day.isCurrentMonth) {
+      const dateStr = day.fullDate.toISOString().split('T')[0];
+      setSelectedDate(dateStr);
+      setShowAddTask(true);
     }
   };
-  
-  // Handle task click
-  const handleTaskClick = (task: Task) => {
-    console.log('Task clicked:', task);
-    setSelectedTask(task);
-  };
-  
-  // Handle task addition
-  const handleTaskAdded = async (taskData: any) => {
+
+  // Handle add task
+  const handleAddTask = async () => {
+    if (!newTask.title.trim()) {
+      toast.error('Please enter a task title');
+      return;
+    }
+
+    if (!newTask.projectId) {
+      toast.error('Please select a project');
+      return;
+    }
+
     try {
-      setIsSubmitting(true);
+      setLoading(true);
       
-      // Prepare the task data for API submission
-      const newTaskData = {
-        title: taskData.title,
-        description: taskData.description || '',
-        dueDate: taskData.dueDate,
-        priority: taskData.priority,
-        projectId: taskData.projectId,
-        status: 'pending'
+      const taskData = {
+        title: newTask.title,
+        description: newTask.description,
+        status: 'pending' as const,
+        priority: newTask.priority,
+        dueDate: selectedDate,
+        projectId: newTask.projectId
       };
+
+      await api.post('/api/tasks', taskData);
       
-      console.log('Saving task with data:', newTaskData);
+      toast.success('Task added successfully');
+      setShowAddTask(false);
+      setNewTask({
+        title: '',
+        description: '',
+        priority: 'medium',
+        projectId: projects.length > 1 ? projects[1].id : ''
+      });
       
-      // In a real app, this would be a real API endpoint
-      // For now, we'll simulate the API call
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Reload data to show the new task
+      await loadData();
       
-      // Create a new task with a generated ID
-      const newTask: Task = {
-        id: `task-${Date.now()}`,
-        title: taskData.title,
-        date: taskData.dueDate,
-        status: 'pending',
-        description: taskData.description || undefined,
-        priority: taskData.priority,
-        projectId: taskData.projectId
-      };
-      
-      // For persistence between page reloads (simulating a database)
-      const savedTasks = localStorage.getItem('savedTasks') 
-        ? JSON.parse(localStorage.getItem('savedTasks') || '[]') 
-        : [];
-      
-      // Add the new task to local storage
-      localStorage.setItem('savedTasks', JSON.stringify([...savedTasks, newTask]));
-      
-      // Add the new task to the task list
-      setTasks(prevTasks => [...prevTasks, newTask]);
-      setIsAddingTask(false);
-      toast.success('Task added successfully!');
     } catch (error) {
       console.error('Error adding task:', error);
       toast.error('Failed to add task');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
-  
-  // Toggle dark mode
-  const toggleDarkMode = () => {
-    setDarkMode(!darkMode);
-  };
-  
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-white mb-4">Please log in to view your calendar</h2>
+          <p className="text-gray-400">You need to be authenticated to access this page.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="max-w-6xl mx-auto"
-      >
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-white">Calendar</h1>
-          <div className="flex items-center space-x-2">
-            {/* View toggle */}
-            <div className="flex bg-[#1e1e1e] rounded-md p-1">
+    <div className="min-h-screen bg-[#0a0a0a] p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="flex items-center justify-between mb-8"
+        >
+          <div className="flex items-center space-x-4">
+            <h1 className="text-3xl font-bold text-white">
+              {monthNames[month]} {year}
+            </h1>
+            <div className="flex items-center space-x-2">
               <button
-                onClick={() => setView('calendar')}
-                className={`p-2 rounded ${view === 'calendar' ? 'bg-[#ffffff]/20 text-[#ffffff]' : 'text-gray-400'}`}
+                onClick={() => navigateMonth('prev')}
+                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
               >
-                <Calendar className="h-5 w-5" />
+                <ChevronLeft className="h-5 w-5" />
               </button>
               <button
-                onClick={() => setView('list')}
-                className={`p-2 rounded ${view === 'list' ? 'bg-[#ffffff]/20 text-[#ffffff]' : 'text-gray-400'}`}
+                onClick={() => navigateMonth('next')}
+                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
               >
-                <List className="h-5 w-5" />
+                <ChevronRight className="h-5 w-5" />
               </button>
             </div>
-            
-            {/* Create task button */}
+          </div>
+
+          <div className="flex items-center space-x-4">
             <Button
-              variant="default"
+              variant="ghost"
               size="sm"
-              className="px-3"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => setIsAddingTask(true)}
+              onClick={goToToday}
             >
-              Add Task
+              Today
             </Button>
-          </div>
-        </div>
-        
-        {/* Calendar view */}
-        {view === 'calendar' && (
-          <div className="glass-card rounded-xl p-6 border border-[#ffffff]/20">
-            {loading ? (
-              <div className="flex justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-[#ffffff]"></div>
-              </div>
-            ) : (
-              <TaskCalendar 
-                tasks={tasks}
-                onTaskClick={handleTaskClick}
-                onDateClick={handleDateClick}
-                darkMode={darkMode}
-              />
-            )}
-          </div>
-        )}
-        
-        {/* List view */}
-        {view === 'list' && (
-          <div className="glass-card rounded-xl p-6 border border-[#ffffff]/20">
-            <h2 className="text-lg font-semibold mb-4 text-white">Upcoming Tasks</h2>
             
-            {loading ? (
-              <div className="flex justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-[#ffffff]"></div>
+            {/* Project Filter */}
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4 text-gray-400" />
+              <select
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                className="bg-[#1a1a1a] border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {projects.map(project => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Calendar Grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="bg-[#111111] rounded-xl border border-white/10 overflow-hidden"
+        >
+          {/* Day Headers */}
+          <div className="grid grid-cols-7 border-b border-white/10">
+            {dayNames.map(day => (
+              <div key={day} className="p-4 text-center">
+                <span className="text-sm font-medium text-gray-400">{day}</span>
               </div>
-            ) : tasks.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-gray-400">No tasks found</p>
-                <Button 
-                  variant="default" 
-                  size="sm" 
-                  className="mt-4"
-                  onClick={() => setIsAddingTask(true)}
+            ))}
+          </div>
+
+          {/* Calendar Days */}
+          <div className="grid grid-cols-7">
+            {calendarDays.map((day, index) => {
+              const dayTasks = getTasksForDate(day.fullDate);
+              
+              return (
+                <div
+                  key={index}
+                  onClick={() => handleDateClick(day)}
+                  className={`min-h-[120px] p-2 border-r border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors ${
+                    !day.isCurrentMonth ? 'opacity-30' : ''
+                  } ${
+                    day.isToday ? 'bg-blue-500/10' : ''
+                  }`}
                 >
-                  Add your first task
+                  <div className={`text-sm font-medium mb-2 ${
+                    day.isToday ? 'text-blue-400' : day.isCurrentMonth ? 'text-white' : 'text-gray-500'
+                  }`}>
+                    {day.date}
+                  </div>
+                  
+                  {/* Tasks for this day */}
+                  <div className="space-y-1">
+                    {dayTasks.slice(0, 3).map(task => (
+                      <div
+                        key={task.id}
+                        className="text-xs p-1 rounded truncate"
+                        style={{ backgroundColor: `${task.color}20`, color: task.color }}
+                      >
+                        {task.title}
+                      </div>
+                    ))}
+                    {dayTasks.length > 3 && (
+                      <div className="text-xs text-gray-400">
+                        +{dayTasks.length - 3} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+
+        {/* Add Task Modal */}
+        {showAddTask && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-[#1a1a1a] rounded-xl border border-white/10 p-6 w-full max-w-md"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white">Add New Task</h3>
+                <button
+                  onClick={() => setShowAddTask(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Task Title */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Task Title
+                  </label>
+                  <input
+                    type="text"
+                    value={newTask.title}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter task title"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Description (Optional)
+                  </label>
+                  <textarea
+                    value={newTask.description}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    rows={3}
+                    placeholder="Enter task description"
+                  />
+                </div>
+
+                {/* Project */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Project
+                  </label>
+                  <select
+                    value={newTask.projectId}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, projectId: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select a project</option>
+                    {projects.filter(p => p.id !== 'all').map(project => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Priority */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Priority
+                  </label>
+                  <select
+                    value={newTask.priority}
+                    onChange={(e) => setNewTask(prev => ({ ...prev, priority: e.target.value as 'low' | 'medium' | 'high' }))}
+                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+
+                {/* Selected Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Due Date
+                  </label>
+                  <div className="flex items-center space-x-2 px-3 py-2 bg-[#222222] border border-white/10 rounded-lg">
+                    <CalendarIcon className="h-4 w-4 text-gray-400" />
+                    <span className="text-white">
+                      {new Date(selectedDate).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end space-x-3 mt-6">
+                <Button
+                  variant="ghost"
+                  onClick={() => setShowAddTask(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="default"
+                  onClick={handleAddTask}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Add Task
+                    </>
+                  )}
                 </Button>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {tasks
-                  .filter(task => new Date(task.date) >= new Date(new Date().setHours(0, 0, 0, 0)))
-                  .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                  .map(task => {
-                    const taskDate = new Date(task.date);
-                    const isToday = new Date().toDateString() === taskDate.toDateString();
-                    const isTomorrow = new Date(new Date().getTime() + 86400000).toDateString() === taskDate.toDateString();
-                    
-                    let dateLabel = taskDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                    if (isToday) dateLabel = 'Today';
-                    if (isTomorrow) dateLabel = 'Tomorrow';
-                    
-                    return (
-                      <div 
-                        key={task.id}
-                        className="p-3 rounded-lg bg-[#111111]/60 hover:bg-[#ffffff]/5 cursor-pointer transition-colors border border-[#ffffff]/10"
-                        onClick={() => handleTaskClick(task)}
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="text-white font-medium">{task.title}</h3>
-                            {task.description && (
-                              <p className="text-gray-400 text-sm mt-1">{task.description}</p>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-end">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs
-                              ${task.status === 'completed' 
-                                ? 'bg-green-500/20 text-green-400' 
-                                : task.status === 'in_progress' 
-                                  ? 'bg-blue-500/20 text-blue-400' 
-                                  : task.status === 'overdue'
-                                    ? 'bg-red-500/20 text-red-400'
-                                    : 'bg-yellow-500/20 text-yellow-400'
-                              }`}
-                            >
-                              {task.status.replace('_', ' ')}
-                            </span>
-                            <div className="flex items-center mt-2 text-gray-400 text-sm">
-                              <Calendar className="w-3 h-3 mr-1" />
-                              <span>{dateLabel}</span>
-                              {task.time && (
-                                <>
-                                  <span className="mx-1">•</span>
-                                  <Clock className="w-3 h-3 mr-1" />
-                                  <span>{task.time}</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
+            </motion.div>
           </div>
         )}
-      </motion.div>
-      
-      {/* Add Task Modal */}
-      {isAddingTask && (
-        <TaskForm 
-          onClose={() => setIsAddingTask(false)}
-          onSubmit={handleTaskAdded}
-          isSubmitting={isSubmitting}
-          showProjectSelector={true}
-        />
-      )}
-    </main>
+      </div>
+    </div>
   );
 } 
