@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { AlertTriangle, X } from 'lucide-react';
-import Button from './Button';
+import Button from '@/components/ui/Button';
 
 interface ConfirmationDialogProps {
   isOpen: boolean;

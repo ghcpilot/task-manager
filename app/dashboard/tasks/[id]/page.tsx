@@ -7,7 +7,7 @@ import {
   ArrowLeft, Loader2, Trash2, Edit, Clock, 
   CalendarDays, Tag, PlayCircle, Plus, Paperclip 
 } from 'lucide-react';
-import Button from '@/app/components/ui/Button';
+import Button from '@/components/ui/Button';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import ConfirmationDialog from '@/app/components/ui/ConfirmationDialog';

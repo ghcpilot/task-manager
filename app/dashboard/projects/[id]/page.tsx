@@ -9,7 +9,7 @@ import {
   Filter, CheckSquare, X, PlusCircle, Search,
   Info, BarChart3, Settings
 } from 'lucide-react';
-import Button from '@/app/components/ui/Button';
+import Button from '@/components/ui/Button';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import TaskModal from '@/app/components/ui/TaskModal';

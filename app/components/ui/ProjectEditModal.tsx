@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Save } from 'lucide-react';
-import Button from './Button';
+import Button from '@/components/ui/Button';
 
 interface Project {
   id: string;

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Loader2, Calendar } from 'lucide-react';
-import Button from '@/app/components/ui/Button';
+import Button from '@/components/ui/Button';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import { z } from 'zod';
