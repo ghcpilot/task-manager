@@ -1,497 +1,507 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  CheckSquare, Plus, Loader2, Filter, Clock, Calendar, 
-  CheckCircle, CircleDashed, Circle, Search, PlusCircle,
-  List, TableProperties, User, ArrowDown, ArrowUp, Calendar as CalendarIcon,
-  Grid, ArrowUpDown, Tag, XCircle, AlertTriangle, MoreHorizontal
+  CheckSquare, Plus, Filter, Clock, Calendar as CalendarIcon, 
+  CheckCircle2, Circle, Search, List, Grid, Tag, AlertCircle,
+  Clock4, Sparkles, ArrowUpDown, ChevronDown, Check, Trash2, Edit3,
+  ExternalLink
 } from 'lucide-react';
-import Button from '@/app/components/ui/Button';
+import Button from '@/components/ui/Button';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import TaskModal from '@/app/components/ui/TaskModal';
-import { useRouter } from 'next/navigation';
-
-interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  status: 'pending' | 'in-progress' | 'completed' | 'overdue';
-  dueDate: string | null;
-  createdAt: string;
-  updatedAt: string;
-  projectId: string;
-  project?: {
-    id: string;
-    name: string;
-    color: string;
-  };
-  assignee?: string;
-  priority: 'low' | 'medium' | 'high';
-  tags?: string[];
-}
+import { getTasks, updateTask, deleteTask, getProjects, LocalTask, LocalProject } from '@/lib/localDb';
 
 export default function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<LocalTask[]>([]);
+  const [projects, setProjects] = useState<LocalProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'in-progress' | 'completed' | 'overdue'>('all');
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const [sortBy, setSortBy] = useState<'title' | 'dueDate' | 'status' | 'project'>('dueDate');
+  const [sortBy, setSortBy] = useState<'dueDate' | 'title' | 'priority' | 'status'>('dueDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const router = useRouter();
 
-  // Fetch tasks
+  const loadData = () => {
+    try {
+      setLoading(true);
+      const allTasks = getTasks();
+      const allProjects = getProjects();
+      setTasks(allTasks);
+      setProjects(allProjects);
+    } catch (err) {
+      console.error('Error loading tasks:', err);
+      toast.error('Failed to load tasks');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchTasks = async () => {
-      try {
-        setLoading(true);
-        
-        // First try to get tasks from localStorage
-        const savedTasks = localStorage.getItem('savedTasks')
-          ? JSON.parse(localStorage.getItem('savedTasks') || '[]')
-          : [];
-          
-        if (savedTasks.length > 0) {
-          console.log('Loading tasks from localStorage:', savedTasks);
-          setTasks(savedTasks);
-        } else {
-          // Fall back to API if no local tasks
-          const response = await fetch('/api/tasks');
-          
-          if (!response.ok) {
-            throw new Error('Failed to fetch tasks');
-          }
-          
-          const data = await response.json();
-          setTasks(data);
-        }
-      } catch (error) {
-        console.error('Error fetching tasks:', error);
-        toast.error('Failed to load tasks');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchTasks();
+    loadData();
   }, []);
 
-  // Format date
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return 'No due date';
-    const date = new Date(dateString);
+  const projectMap = useMemo(() => {
+    const map: Record<string, LocalProject> = {};
+    projects.forEach(p => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [projects]);
+
+  const handleToggleStatus = (task: LocalTask) => {
+    const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
+    const updated = updateTask(task.id, {
+      status: nextStatus,
+      completedAt: nextStatus === 'completed' ? new Date().toISOString() : undefined,
+    });
+    if (updated) {
+      setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+      toast.success(nextStatus === 'completed' ? 'Task marked complete! 🎉' : 'Task reopened');
+    }
+  };
+
+  const handleDeleteTask = (taskId: string) => {
+    if (confirm('Are you sure you want to delete this task?')) {
+      deleteTask(taskId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      toast.success('Task deleted');
+    }
+  };
+
+  const filteredTasks = useMemo(() => {
+    return tasks
+      .filter(task => {
+        if (filter === 'all') return true;
+        if (filter === 'in-progress') {
+          return task.status === 'in_progress' || (task.status as any) === 'in-progress';
+        }
+        if (filter === 'overdue') {
+          if (!task.dueDate || task.status === 'completed') return false;
+          return new Date(task.dueDate).getTime() < new Date().setHours(0, 0, 0, 0);
+        }
+        return task.status === filter;
+      })
+      .filter(task => {
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase();
+        const projectName = (task.projectId ? projectMap[task.projectId]?.name : '') || '';
+        return (
+          task.title.toLowerCase().includes(q) ||
+          (task.description && task.description.toLowerCase().includes(q)) ||
+          projectName.toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => {
+        let diff = 0;
+        if (sortBy === 'title') {
+          diff = a.title.localeCompare(b.title);
+        } else if (sortBy === 'dueDate') {
+          const timeA = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+          const timeB = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+          diff = timeA - timeB;
+        } else if (sortBy === 'priority') {
+          const priorityScore: Record<string, number> = { high: 3, medium: 2, low: 1 };
+          diff = (priorityScore[b.priority || 'medium'] || 0) - (priorityScore[a.priority || 'medium'] || 0);
+        } else if (sortBy === 'status') {
+          diff = a.status.localeCompare(b.status);
+        }
+        return sortOrder === 'asc' ? diff : -diff;
+      });
+  }, [tasks, filter, searchQuery, sortBy, sortOrder, projectMap]);
+
+  // Counts
+  const counts = useMemo(() => {
+    const today = new Date().setHours(0, 0, 0, 0);
+    return {
+      all: tasks.length,
+      pending: tasks.filter(t => t.status === 'pending').length,
+      inProgress: tasks.filter(t => t.status === 'in_progress' || (t.status as any) === 'in-progress').length,
+      completed: tasks.filter(t => t.status === 'completed').length,
+      overdue: tasks.filter(t => t.dueDate && t.status !== 'completed' && new Date(t.dueDate).getTime() < today).length,
+    };
+  }, [tasks]);
+
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) return null;
+    const d = new Date(dateString);
     return new Intl.DateTimeFormat('en-US', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric'
-    }).format(date);
+    }).format(d);
   };
 
-  // Sort and filter tasks
-  const filteredAndSortedTasks = tasks
-    // First filter by status if applicable
-    .filter(task => {
-      if (filter === 'all') return true;
-      return task.status === filter;
-    })
-    // Then filter by search query
-    .filter(task => 
-      !searchQuery || 
-      task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (task.project?.name && task.project.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    )
-    // Then sort
-    .sort((a, b) => {
-      let comparison = 0;
-      
-      if (sortBy === 'title') {
-        comparison = a.title.localeCompare(b.title);
-      } else if (sortBy === 'dueDate') {
-        const dateA = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
-        const dateB = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
-        comparison = dateA - dateB;
-      } else if (sortBy === 'status') {
-        const statusOrder = { 'completed': 3, 'in-progress': 2, 'pending': 1, 'overdue': 0 };
-        comparison = statusOrder[a.status] - statusOrder[b.status];
-      } else if (sortBy === 'project') {
-        comparison = (a.project?.name || '').localeCompare(b.project?.name || '');
-      }
-      
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-
-  // Update task status
-  const updateTaskStatus = async (taskId: string, status: 'pending' | 'in-progress' | 'completed' | 'overdue') => {
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to update task');
-      }
-      
-      const updatedTask = await response.json();
-      
-      // Update local state
-      setTasks(tasks.map(task => 
-        task.id === taskId ? updatedTask : task
-      ));
-      
-      toast.success('Task updated');
-    } catch (error) {
-      console.error('Error updating task:', error);
-      toast.error('Failed to update task');
-    }
-  };
-
-  // Handle adding a new task
-  const handleTaskAdded = (newTask: Task) => {
-    setTasks(prevTasks => [newTask, ...prevTasks]);
-  };
-
-  // Get status icon
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="h-4 w-4 text-[#ffffff]" />;
-      case 'in-progress':
-        return <Circle className="h-4 w-4 text-[#8540ff]" />;
-      case 'pending':
-        return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-      case 'overdue':
-        return <XCircle className="h-4 w-4 text-red-500" />;
+  const getPriorityBadge = (priority?: string) => {
+    switch (priority) {
+      case 'high':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">High</span>;
+      case 'medium':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">Medium</span>;
       default:
-        return <CircleDashed className="h-4 w-4 text-gray-400" />;
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">Low</span>;
     }
   };
-
-  // Get status text with color
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return <span className="text-[#ffffff]">Completed</span>;
-      case 'in-progress':
-        return <span className="text-[#8540ff]">In Progress</span>;
-      case 'pending':
-        return <span className="text-yellow-500">Pending</span>;
-      case 'overdue':
-        return <span className="text-red-500">Overdue</span>;
-      default:
-        return <span className="text-gray-400">To Do</span>;
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin h-12 w-12 border-4 border-[#2e2e2e] rounded-full border-t-[#ffffff]"></div>
-      </div>
-    );
-  }
 
   return (
-    <main className="flex-1 h-full flex flex-col">
-      {/* Command bar */}
-      <div className="px-4 py-3 border-b border-[#8540ff]/20 bg-[#0a0118]/30 backdrop-blur-sm flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={viewMode === 'list' ? 'bg-[#8540ff]/10' : ''}
-            onClick={() => setViewMode('list')}
-          >
-            <List className="h-4 w-4 mr-1" />
-            List
-          </Button>
-          <Button
-            variant="ghost" 
-            size="sm"
-            className={viewMode === 'grid' ? 'bg-[#8540ff]/10' : ''}
-            onClick={() => setViewMode('grid')}
-          >
-            <Grid className="h-4 w-4 mr-1" />
-            Grid
-          </Button>
-          <div className="h-4 w-[1px] bg-[#8540ff]/20 mx-2"></div>
-          <div className="relative">
-            <Button 
-              size="sm" 
-              variant="ghost"
-              className={`${showFilterMenu ? 'bg-[#8540ff]/20' : ''} ${filter !== 'all' ? 'text-[#8540ff]' : ''}`}
-              onClick={() => setShowFilterMenu(!showFilterMenu)}
-            >
-              <Filter className="h-4 w-4 mr-1" />
-              {filter === 'all' ? 'All Tasks' : filter === 'in-progress' ? 'In Progress' : filter === 'completed' ? 'Completed' : filter === 'overdue' ? 'Overdue' : 'To Do'}
-            </Button>
-            
-            <AnimatePresence>
-              {showFilterMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute top-full left-0 mt-1 w-48 bg-[#0a0118] border border-[#8540ff]/20 rounded-md shadow-lg z-10 p-2"
-                >
-                  <div className="flex flex-col gap-1">
-                    <button
-                      onClick={() => { setFilter('all'); setShowFilterMenu(false); }}
-                      className={`text-left px-3 py-1.5 rounded-md text-sm ${filter === 'all' ? 'bg-[#8540ff]/20 text-white' : 'text-gray-300 hover:bg-[#8540ff]/10'}`}
-                    >
-                      All Tasks
-                    </button>
-                    <button
-                      onClick={() => { setFilter('pending'); setShowFilterMenu(false); }}
-                      className={`text-left px-3 py-1.5 rounded-md text-sm ${filter === 'pending' ? 'bg-[#8540ff]/20 text-white' : 'text-gray-300 hover:bg-[#8540ff]/10'}`}
-                    >
-                      To Do
-                    </button>
-                    <button
-                      onClick={() => { setFilter('in-progress'); setShowFilterMenu(false); }}
-                      className={`text-left px-3 py-1.5 rounded-md text-sm ${filter === 'in-progress' ? 'bg-[#8540ff]/20 text-white' : 'text-gray-300 hover:bg-[#8540ff]/10'}`}
-                    >
-                      In Progress
-                    </button>
-                    <button
-                      onClick={() => { setFilter('completed'); setShowFilterMenu(false); }}
-                      className={`text-left px-3 py-1.5 rounded-md text-sm ${filter === 'completed' ? 'bg-[#8540ff]/20 text-white' : 'text-gray-300 hover:bg-[#8540ff]/10'}`}
-                    >
-                      Completed
-                    </button>
-                    <button
-                      onClick={() => { setFilter('overdue'); setShowFilterMenu(false); }}
-                      className={`text-left px-3 py-1.5 rounded-md text-sm ${filter === 'overdue' ? 'bg-[#8540ff]/20 text-white' : 'text-gray-300 hover:bg-[#8540ff]/10'}`}
-                    >
-                      Overdue
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+    <div className="min-h-screen p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+      {/* Top Banner & Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">Tasks</h1>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">
+              {tasks.length} total
+            </span>
           </div>
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+            Organize, prioritize, and track all your work items in one place.
+          </p>
         </div>
-        
-        <div className="flex items-center gap-3">
-          <form className="relative" onSubmit={(e) => e.preventDefault()}>
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-[#0c0428]/80 rounded-md pl-10 pr-4 py-2 text-sm border border-[#8540ff]/20 focus:outline-none focus:ring-1 focus:ring-[#8540ff]/50 text-white w-full md:w-64"
-            />
-          </form>
-          <Button 
-            variant="default"
+
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="primary"
             onClick={() => setIsAddingTask(true)}
-            className="flex items-center gap-1"
+            className="flex items-center gap-2 text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-500/20"
           >
-            <PlusCircle className="h-4 w-4" />
-            <span className="hidden md:inline">New Task</span>
+            <Plus className="w-4 h-4" />
+            <span>New Task</span>
           </Button>
         </div>
-      </div>
-      
-      {/* Tasks content */}
-      <div className="flex-1 overflow-auto">
-        {filteredAndSortedTasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full p-4">
-            <div className="bg-[#0a0118] rounded-full p-4 mb-4">
-              <CheckSquare className="h-8 w-8 text-[#8540ff]" />
-            </div>
-            <h3 className="text-xl font-semibold text-white mb-2">No tasks found</h3>
-            <p className="text-gray-400 mb-4 text-center">
-              {searchQuery 
-                ? 'Try a different search term or filter' 
-                : filter !== 'all' 
-                  ? `No ${filter} tasks found. Try a different filter.` 
-                  : 'Get started by creating your first task'}
-            </p>
-            {!searchQuery && filter === 'all' && (
-              <Button 
-                variant="default"
-                onClick={() => setIsAddingTask(true)}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Create Task
-              </Button>
-            )}
-          </div>
-        ) : (
-          <>
-            {viewMode === 'list' ? (
-              // List view
-              <div className="p-4 space-y-2">
-                {filteredAndSortedTasks.map((task) => (
-                  <Link href={`/dashboard/tasks/${task.id}`} key={task.id}>
-                    <div className="rounded-md border border-[#8540ff]/20 bg-[#0a0118]/60 p-3 hover:border-[#8540ff]/40 transition-all cursor-pointer flex items-center group">
-                      <div className="flex-shrink-0 p-1 mr-3">
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            updateTaskStatus(
-                              task.id,
-                              task.status === 'completed' 
-                                ? 'pending' 
-                                : task.status === 'in-progress' 
-                                  ? 'completed' 
-                                  : task.status === 'overdue' 
-                                    ? 'pending' 
-                                    : 'in-progress'
-                            );
-                          }}
-                          className="hover:scale-110 transition-transform"
-                        >
-                          {getStatusIcon(task.status)}
-                        </button>
-                      </div>
-                      
-                      <div className="flex-1 min-w-0">
-                        <h3 className={`font-medium ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-white'}`}>
-                          {task.title}
-                        </h3>
-                        {task.description && (
-                          <p className="text-gray-400 text-sm line-clamp-1 mt-0.5">
-                            {task.description}
-                          </p>
-                        )}
-                      </div>
-                      
-                      <div className="flex items-center gap-4 ml-4">
-                        {task.project && (
-                          <div className="hidden md:flex items-center gap-1.5">
-                            <div 
-                              className="w-3 h-3 rounded-full" 
-                              style={{ backgroundColor: task.project.color }}
-                            ></div>
-                            <span className="text-gray-400 text-sm">{task.project.name}</span>
-                          </div>
-                        )}
-                        
-                        {task.dueDate && (
-                          <div className="flex items-center text-sm">
-                            <CalendarIcon className="h-3.5 w-3.5 mr-1.5 text-[#ffffff]" />
-                            <span className="text-gray-400">{formatDate(task.dueDate)}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              // Grid view
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredAndSortedTasks.map((task) => (
-                  <motion.div
-                    key={task.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="glass-card rounded-xl p-4 border border-[#8540ff]/20 hover:border-[#8540ff]/50 transition-colors"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div 
-                        className="px-2 py-1 rounded-md text-xs"
-                        style={{ 
-                          backgroundColor: `${task.project?.color}20`,
-                          color: task.project?.color
-                        }}
-                      >
-                        {task.project?.name}
-                      </div>
-                      <span className={`
-                        px-2 py-1 rounded-full text-xs
-                        ${task.status === 'completed' ? 'bg-green-500/20 text-green-400' : 
-                          task.status === 'in-progress' ? 'bg-blue-500/20 text-blue-400' : 
-                          task.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 
-                          'bg-red-500/20 text-red-400'}
-                      `}>
-                        {task.status.replace('_', ' ')}
-                      </span>
-                    </div>
-                    
-                    <h3 className="text-white font-medium mb-2">{task.title}</h3>
-                    
-                    {task.description && (
-                      <p className="text-gray-400 text-sm mb-3 line-clamp-2">{task.description}</p>
-                    )}
-                    
-                    <div className="mt-4 space-y-2">
-                      {task.dueDate && (
-                        <div className="flex items-center text-sm">
-                          <CalendarIcon className="h-4 w-4 mr-2 text-gray-500" />
-                          <span className="text-gray-300">{formatDate(task.dueDate)}</span>
-                        </div>
-                      )}
-                      
-                      {task.assignee && (
-                        <div className="flex items-center text-sm">
-                          <User className="h-4 w-4 mr-2 text-gray-500" />
-                          <span className="text-gray-300">{task.assignee}</span>
-                        </div>
-                      )}
-                      
-                      {task.tags && task.tags.length > 0 && (
-                        <div className="flex items-center text-sm">
-                          <Tag className="h-4 w-4 mr-2 text-gray-500" />
-                          <div className="flex flex-wrap gap-1">
-                            {task.tags.map((tag, index) => (
-                              <span 
-                                key={index}
-                                className="bg-[#8540ff]/10 text-[#8540ff] px-1.5 py-0.5 rounded text-xs"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="mt-4 pt-3 border-t border-[#8540ff]/10 flex justify-between">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-[#8540ff]"
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-gray-400"
-                      >
-                        View
-                      </Button>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
       </div>
 
-      {/* Add Task Modal */}
+      {/* Filter Tabs & Search Controls */}
+      <div className="glass-card rounded-2xl p-3 sm:p-4 border border-white/[0.08] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        {/* Status Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
+          {[
+            { id: 'all', label: 'All', count: counts.all },
+            { id: 'in-progress', label: 'In Progress', count: counts.inProgress },
+            { id: 'pending', label: 'To Do', count: counts.pending },
+            { id: 'completed', label: 'Completed', count: counts.completed },
+            { id: 'overdue', label: 'Overdue', count: counts.overdue },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setFilter(tab.id as any)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                filter === tab.id
+                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
+              }`}
+            >
+              <span>{tab.label}</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  filter === tab.id ? 'bg-indigo-800/60 text-white' : 'bg-white/[0.06] text-zinc-400'
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Search, Sort, View Controls */}
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Search Input */}
+          <div className="relative flex-1 sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search tasks..."
+              className="w-full pl-9 pr-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+            />
+          </div>
+
+          {/* Sort Selector */}
+          <div className="relative">
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as any)}
+              className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500/50 cursor-pointer appearance-none pr-7"
+            >
+              <option value="dueDate" className="bg-[#121216] text-white">Sort: Due Date</option>
+              <option value="priority" className="bg-[#121216] text-white">Sort: Priority</option>
+              <option value="title" className="bg-[#121216] text-white">Sort: Title</option>
+              <option value="status" className="bg-[#121216] text-white">Sort: Status</option>
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-zinc-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.08]">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-lg text-xs transition-colors ${
+                viewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+              title="List View"
+            >
+              <List className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-lg text-xs transition-colors ${
+                viewMode === 'grid' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+              title="Grid View"
+            >
+              <Grid className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Task List / Grid Display */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+        </div>
+      ) : filteredTasks.length === 0 ? (
+        <div className="glass-card rounded-2xl p-12 text-center border border-white/[0.06]">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto mb-3 text-indigo-400">
+            <CheckSquare className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-white">No tasks found</h3>
+          <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto">
+            {searchQuery
+              ? 'No tasks matched your search. Try changing keywords or resetting the filter.'
+              : filter !== 'all'
+              ? `No ${filter} tasks right now. Great job keeping on top of your work!`
+              : 'You have no tasks yet. Create your first task to start organizing!'}
+          </p>
+          <div className="mt-5">
+            <Button
+              variant="primary"
+              onClick={() => setIsAddingTask(true)}
+              className="text-xs px-4 py-2 rounded-xl"
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              Create Task
+            </Button>
+          </div>
+        </div>
+      ) : viewMode === 'list' ? (
+        /* List View */
+        <div className="space-y-2">
+          {filteredTasks.map(task => {
+            const project = task.projectId ? projectMap[task.projectId] : undefined;
+            const isCompleted = task.status === 'completed';
+            const isOverdue =
+              task.dueDate &&
+              !isCompleted &&
+              new Date(task.dueDate).getTime() < new Date().setHours(0, 0, 0, 0);
+
+            return (
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className={`glass-card rounded-xl p-3 sm:p-4 border transition-all flex items-center justify-between gap-3 group hover:border-indigo-500/30 ${
+                  isCompleted ? 'opacity-65 border-white/[0.04] bg-white/[0.01]' : 'border-white/[0.08]'
+                }`}
+              >
+                {/* Left: Complete Checkbox + Title + Description */}
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <button
+                    onClick={() => handleToggleStatus(task)}
+                    className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all flex-shrink-0 ${
+                      isCompleted
+                        ? 'bg-emerald-500 border-emerald-500 text-white'
+                        : 'border-zinc-600 hover:border-indigo-400 bg-white/[0.02]'
+                    }`}
+                  >
+                    {isCompleted && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                  </button>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/dashboard/tasks/${task.id}`}
+                        className={`text-xs sm:text-sm font-medium hover:text-indigo-400 transition-colors truncate ${
+                          isCompleted ? 'line-through text-zinc-500' : 'text-zinc-100'
+                        }`}
+                      >
+                        {task.title}
+                      </Link>
+                      {getPriorityBadge(task.priority)}
+                    </div>
+                    {task.description && (
+                      <p className="text-[11px] text-zinc-500 truncate mt-0.5">{task.description}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Project Pill + Due Date + Actions */}
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {project && (
+                    <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/[0.06] text-[11px] text-zinc-400">
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: project.color || '#6366f1' }}
+                      />
+                      <span className="truncate max-w-[120px]">{project.name}</span>
+                    </div>
+                  )}
+
+                  {task.dueDate && (
+                    <div
+                      className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-lg ${
+                        isOverdue
+                          ? 'text-rose-400 bg-rose-500/10 border border-rose-500/20'
+                          : isCompleted
+                          ? 'text-zinc-500'
+                          : 'text-zinc-400 bg-white/[0.03]'
+                      }`}
+                    >
+                      <CalendarIcon className="w-3 h-3" />
+                      <span>{formatDate(task.dueDate)}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Link
+                      href={`/dashboard/tasks/${task.id}`}
+                      className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+                      title="View Details"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Link>
+                    <button
+                      onClick={() => handleDeleteTask(task.id)}
+                      className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                      title="Delete Task"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Grid View */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredTasks.map(task => {
+            const project = task.projectId ? projectMap[task.projectId] : undefined;
+            const isCompleted = task.status === 'completed';
+            const isOverdue =
+              task.dueDate &&
+              !isCompleted &&
+              new Date(task.dueDate).getTime() < new Date().setHours(0, 0, 0, 0);
+
+            return (
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className={`glass-card rounded-2xl p-5 border flex flex-col justify-between transition-all hover:border-indigo-500/30 group ${
+                  isCompleted ? 'opacity-65 border-white/[0.04]' : 'border-white/[0.08]'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    {project ? (
+                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-[11px] text-zinc-300">
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: project.color || '#6366f1' }}
+                        />
+                        <span className="truncate max-w-[100px]">{project.name}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-zinc-500">General</span>
+                    )}
+
+                    <div className="flex items-center gap-1.5">
+                      {getPriorityBadge(task.priority)}
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <button
+                      onClick={() => handleToggleStatus(task)}
+                      className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 transition-all ${
+                        isCompleted
+                          ? 'bg-emerald-500 border-emerald-500 text-white'
+                          : 'border-zinc-600 hover:border-indigo-400 bg-white/[0.02]'
+                      }`}
+                    >
+                      {isCompleted && <Check className="w-3 h-3 stroke-[3]" />}
+                    </button>
+
+                    <div>
+                      <Link
+                        href={`/dashboard/tasks/${task.id}`}
+                        className={`text-sm font-semibold hover:text-indigo-400 transition-colors line-clamp-2 ${
+                          isCompleted ? 'line-through text-zinc-500' : 'text-zinc-100'
+                        }`}
+                      >
+                        {task.title}
+                      </Link>
+                      {task.description && (
+                        <p className="text-xs text-zinc-400 line-clamp-2 mt-1">{task.description}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs">
+                  {task.dueDate ? (
+                    <div
+                      className={`flex items-center gap-1 text-[11px] font-medium ${
+                        isOverdue ? 'text-rose-400' : 'text-zinc-400'
+                      }`}
+                    >
+                      <CalendarIcon className="w-3 h-3" />
+                      <span>{formatDate(task.dueDate)}</span>
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-zinc-600">No due date</span>
+                  )}
+
+                  <div className="flex items-center gap-1">
+                    <Link
+                      href={`/dashboard/tasks/${task.id}`}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-medium px-2 py-1 rounded-lg hover:bg-white/[0.04] transition-colors"
+                    >
+                      View
+                    </Link>
+                    <button
+                      onClick={() => handleDeleteTask(task.id)}
+                      className="p-1 rounded-lg text-zinc-500 hover:text-rose-400 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Task Modal */}
       {isAddingTask && (
         <TaskModal
           isOpen={true}
           onClose={() => setIsAddingTask(false)}
-          onAddTask={handleTaskAdded}
+          onAddTask={() => {
+            setIsAddingTask(false);
+            loadData();
+          }}
         />
       )}
-    </main>
+    </div>
   );
-} 
+}

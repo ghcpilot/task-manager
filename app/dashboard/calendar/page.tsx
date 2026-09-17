@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -10,41 +10,26 @@ import {
   Calendar as CalendarIcon,
   Clock,
   X,
-  Save
+  Save,
+  Sparkles,
+  CheckCircle2,
+  FolderOpen
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '@/app/contexts/AuthContext';
-import { useApi } from '@/lib/hooks/useApi';
-
-interface Task {
-  id: string;
-  title: string;
-  date: string; // ISO format: YYYY-MM-DD
-  status: 'completed' | 'in_progress' | 'pending' | 'overdue';
-  description?: string;
-  priority?: 'low' | 'medium' | 'high';
-  projectId?: string;
-  projectName?: string;
-  color?: string;
-}
-
-interface Project {
-  id: string;
-  name: string;
-  color: string;
-}
+import { getProjects, getTasks, createTask, LocalProject, LocalTask } from '@/lib/localDb';
 
 export default function CalendarPage() {
-  const { user, isAuthenticated } = useAuth();
-  const api = useApi();
+  const { user } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<LocalTask[]>([]);
+  const [projects, setProjects] = useState<LocalProject[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('all');
   const [showAddTask, setShowAddTask] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [loading, setLoading] = useState(false);
+
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
@@ -52,195 +37,156 @@ export default function CalendarPage() {
     projectId: ''
   });
 
-  // Load tasks and projects from Firebase
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      loadData();
-    }
-  }, [isAuthenticated, user]);
-
-  const loadData = async () => {
-    if (!user) return;
-    
+  const loadData = () => {
     try {
       setLoading(true);
-      
-      // Load projects and tasks in parallel
-      const [firebaseProjects, firebaseTasks] = await Promise.all([
-        api.get('/api/projects'),
-        api.get('/api/tasks')
-      ]);
-      
-      // Convert Firebase projects to local format
-      const convertedProjects: Project[] = [
-        { id: 'all', name: 'All Projects', color: '#6366f1' },
-        ...firebaseProjects.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          color: p.color
-        }))
-      ];
-      setProjects(convertedProjects);
-      
-      // Set default project if none selected and projects exist
-      if (!newTask.projectId && firebaseProjects.length > 0) {
-        setNewTask(prev => ({ ...prev, projectId: firebaseProjects[0].id }));
+      const allProjects = getProjects();
+      const allTasks = getTasks();
+      setProjects(allProjects);
+      setTasks(allTasks);
+
+      if (!newTask.projectId && allProjects.length > 0) {
+        setNewTask(prev => ({ ...prev, projectId: allProjects[0].id }));
       }
-      
-      // Convert Firebase tasks to local format
-      const convertedTasks: Task[] = firebaseTasks.map((t: any) => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        date: t.dueDate ? new Date(t.dueDate.seconds * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        status: t.status,
-        priority: t.priority,
-        projectId: t.projectId,
-        projectName: firebaseProjects.find((p: any) => p.id === t.projectId)?.name || 'Unknown Project',
-        color: firebaseProjects.find((p: any) => p.id === t.projectId)?.color || '#6366f1'
-      }));
-      setTasks(convertedTasks);
-      
-    } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Failed to load data');
+    } catch (err) {
+      console.error('Error loading calendar data:', err);
+      toast.error('Failed to load calendar');
     } finally {
       setLoading(false);
     }
   };
 
-  // Get calendar data
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // Calendar dates generation
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const today = new Date();
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
   const todayDate = today.getDate();
 
-  // Get first day of month and number of days
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDayOfMonth = new Date(year, month + 1, 0);
   const firstDayWeekday = firstDayOfMonth.getDay();
   const daysInMonth = lastDayOfMonth.getDate();
 
-  // Get previous month's last days to fill the grid
   const prevMonth = new Date(year, month - 1, 0);
   const daysInPrevMonth = prevMonth.getDate();
 
-  // Generate calendar grid
-  const calendarDays = [];
-  
-  // Previous month's days
-  for (let i = firstDayWeekday - 1; i >= 0; i--) {
-    calendarDays.push({
-      date: daysInPrevMonth - i,
-      isCurrentMonth: false,
-      isToday: false,
-      fullDate: new Date(year, month - 1, daysInPrevMonth - i)
-    });
-  }
-  
-  // Current month's days
-  for (let date = 1; date <= daysInMonth; date++) {
-    calendarDays.push({
-      date,
-      isCurrentMonth: true,
-      isToday: isCurrentMonth && date === todayDate,
-      fullDate: new Date(year, month, date)
-    });
-  }
-  
-  // Next month's days to complete the grid
-  const remainingDays = 42 - calendarDays.length;
-  for (let date = 1; date <= remainingDays; date++) {
-    calendarDays.push({
-      date,
-      isCurrentMonth: false,
-      isToday: false,
-      fullDate: new Date(year, month + 1, date)
-    });
-  }
+  const calendarDays = useMemo(() => {
+    const days = [];
+    // Previous month padding
+    for (let i = firstDayWeekday - 1; i >= 0; i--) {
+      days.push({
+        date: daysInPrevMonth - i,
+        isCurrentMonth: false,
+        isToday: false,
+        fullDate: new Date(year, month - 1, daysInPrevMonth - i)
+      });
+    }
+    // Current month days
+    for (let date = 1; date <= daysInMonth; date++) {
+      days.push({
+        date,
+        isCurrentMonth: true,
+        isToday: isCurrentMonth && date === todayDate,
+        fullDate: new Date(year, month, date)
+      });
+    }
+    // Next month padding
+    const remainingDays = 42 - days.length;
+    for (let date = 1; date <= remainingDays; date++) {
+      days.push({
+        date,
+        isCurrentMonth: false,
+        isToday: false,
+        fullDate: new Date(year, month + 1, date)
+      });
+    }
+    return days;
+  }, [year, month, firstDayWeekday, daysInMonth, daysInPrevMonth, isCurrentMonth, todayDate]);
 
-  // Filter tasks by selected project
-  const filteredTasks = selectedProject === 'all' 
-    ? tasks 
-    : tasks.filter(task => task.projectId === selectedProject);
+  const projectMap = useMemo(() => {
+    const map: Record<string, LocalProject> = {};
+    projects.forEach(p => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [projects]);
 
-  // Get tasks for a specific date
+  const filteredTasks = useMemo(() => {
+    if (selectedProject === 'all') return tasks;
+    return tasks.filter(t => t.projectId === selectedProject);
+  }, [tasks, selectedProject]);
+
   const getTasksForDate = (date: Date) => {
     const dateStr = date.toISOString().split('T')[0];
-    return filteredTasks.filter(task => task.date === dateStr);
-  };
-
-  // Navigate months
-  const navigateMonth = (direction: 'prev' | 'next') => {
-    setCurrentDate(prev => {
-      const newDate = new Date(prev);
-      if (direction === 'prev') {
-        newDate.setMonth(prev.getMonth() - 1);
-      } else {
-        newDate.setMonth(prev.getMonth() + 1);
-      }
-      return newDate;
+    return filteredTasks.filter(task => {
+      if (!task.dueDate) return false;
+      const tDate = task.dueDate.split('T')[0];
+      return tDate === dateStr;
     });
   };
 
-  // Go to today
+  const navigateMonth = (direction: 'prev' | 'next') => {
+    setCurrentDate(prev => {
+      const nextDate = new Date(prev);
+      if (direction === 'prev') {
+        nextDate.setMonth(prev.getMonth() - 1);
+      } else {
+        nextDate.setMonth(prev.getMonth() + 1);
+      }
+      return nextDate;
+    });
+  };
+
   const goToToday = () => {
     setCurrentDate(new Date());
   };
 
-  // Handle date click
   const handleDateClick = (day: any) => {
-    if (day.isCurrentMonth) {
-      const dateStr = day.fullDate.toISOString().split('T')[0];
-      setSelectedDate(dateStr);
-      setShowAddTask(true);
+    const dateStr = day.fullDate.toISOString().split('T')[0];
+    setSelectedDate(dateStr);
+    if (!newTask.projectId && projects.length > 0) {
+      setNewTask(prev => ({ ...prev, projectId: projects[0].id }));
     }
+    setShowAddTask(true);
   };
 
-  // Handle add task
-  const handleAddTask = async () => {
+  const handleAddTask = () => {
     if (!newTask.title.trim()) {
       toast.error('Please enter a task title');
       return;
     }
-
     if (!newTask.projectId) {
       toast.error('Please select a project');
       return;
     }
 
     try {
-      setLoading(true);
-      
-      const taskData = {
-        title: newTask.title,
-        description: newTask.description,
-        status: 'pending' as const,
+      createTask({
+        title: newTask.title.trim(),
+        description: newTask.description.trim() || undefined,
+        status: 'pending',
         priority: newTask.priority,
         dueDate: selectedDate,
-        projectId: newTask.projectId
-      };
+        projectId: newTask.projectId,
+      });
 
-      await api.post('/api/tasks', taskData);
-      
-      toast.success('Task added successfully');
+      toast.success('Task scheduled on calendar!');
       setShowAddTask(false);
       setNewTask({
         title: '',
         description: '',
         priority: 'medium',
-        projectId: projects.length > 1 ? projects[1].id : ''
+        projectId: projects.length > 0 ? projects[0].id : '',
       });
-      
-      // Reload data to show the new task
-      await loadData();
-      
+      loadData();
     } catch (error) {
       console.error('Error adding task:', error);
-      toast.error('Failed to add task');
-    } finally {
-      setLoading(false);
+      toast.error('Failed to schedule task');
     }
   };
 
@@ -248,263 +194,270 @@ export default function CalendarPage() {
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
-
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-white mb-4">Please log in to view your calendar</h2>
-          <p className="text-gray-400">You need to be authenticated to access this page.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-[#0a0a0a] p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex items-center justify-between mb-8"
-        >
-          <div className="flex items-center space-x-4">
-            <h1 className="text-3xl font-bold text-white">
-              {monthNames[month]} {year}
+    <div className="min-h-screen p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+      {/* Calendar Header Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+              {monthNames[month]} <span className="text-indigo-400">{year}</span>
             </h1>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] p-0.5 rounded-xl">
               <button
                 onClick={() => navigateMonth('prev')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
+                title="Previous Month"
               >
-                <ChevronLeft className="h-5 w-5" />
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={goToToday}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/[0.08] transition-colors"
+              >
+                Today
               </button>
               <button
                 onClick={() => navigateMonth('next')}
-                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
+                title="Next Month"
               >
-                <ChevronRight className="h-5 w-5" />
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+            Click any day to schedule a task or preview your deadlines.
+          </p>
+        </div>
 
-          <div className="flex items-center space-x-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={goToToday}
+        {/* Project Filter */}
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+            <select
+              value={selectedProject}
+              onChange={e => setSelectedProject(e.target.value)}
+              className="pl-9 pr-8 py-2 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500/50 cursor-pointer appearance-none"
             >
-              Today
-            </Button>
-            
-            {/* Project Filter */}
-            <div className="flex items-center space-x-2">
-              <Filter className="h-4 w-4 text-gray-400" />
-              <select
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="bg-[#1a1a1a] border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {projects.map(project => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
+              <option value="all" className="bg-[#121216] text-white">All Projects</option>
+              {projects.map(project => (
+                <option key={project.id} value={project.id} className="bg-[#121216] text-white">
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <Button
+            variant="primary"
+            onClick={() => {
+              setSelectedDate(new Date().toISOString().split('T')[0]);
+              setShowAddTask(true);
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Event</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Calendar Board Card */}
+      <div className="glass-card rounded-3xl border border-white/[0.08] shadow-2xl overflow-hidden">
+        {/* Weekday labels */}
+        <div className="grid grid-cols-7 border-b border-white/[0.06] bg-white/[0.02]">
+          {dayNames.map(day => (
+            <div key={day} className="py-3 text-center">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{day}</span>
             </div>
-          </div>
-        </motion.div>
+          ))}
+        </div>
 
-        {/* Calendar Grid */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="bg-[#111111] rounded-xl border border-white/10 overflow-hidden"
-        >
-          {/* Day Headers */}
-          <div className="grid grid-cols-7 border-b border-white/10">
-            {dayNames.map(day => (
-              <div key={day} className="p-4 text-center">
-                <span className="text-sm font-medium text-gray-400">{day}</span>
-              </div>
-            ))}
-          </div>
+        {/* Grid Cells */}
+        <div className="grid grid-cols-7 divide-x divide-y divide-white/[0.05]">
+          {calendarDays.map((day, idx) => {
+            const dayTasks = getTasksForDate(day.fullDate);
+            return (
+              <div
+                key={idx}
+                onClick={() => handleDateClick(day)}
+                className={`min-h-[105px] sm:min-h-[125px] p-2 sm:p-2.5 transition-colors cursor-pointer group hover:bg-white/[0.03] flex flex-col justify-between ${
+                  !day.isCurrentMonth ? 'opacity-30 bg-black/20' : ''
+                } ${day.isToday ? 'bg-indigo-500/[0.06]' : ''}`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span
+                      className={`text-xs font-semibold inline-flex items-center justify-center w-6 h-6 rounded-full transition-all ${
+                        day.isToday
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
+                          : day.isCurrentMonth
+                          ? 'text-zinc-200 group-hover:text-white'
+                          : 'text-zinc-600'
+                      }`}
+                    >
+                      {day.date}
+                    </span>
 
-          {/* Calendar Days */}
-          <div className="grid grid-cols-7">
-            {calendarDays.map((day, index) => {
-              const dayTasks = getTasksForDate(day.fullDate);
-              
-              return (
-                <div
-                  key={index}
-                  onClick={() => handleDateClick(day)}
-                  className={`min-h-[120px] p-2 border-r border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors ${
-                    !day.isCurrentMonth ? 'opacity-30' : ''
-                  } ${
-                    day.isToday ? 'bg-blue-500/10' : ''
-                  }`}
-                >
-                  <div className={`text-sm font-medium mb-2 ${
-                    day.isToday ? 'text-blue-400' : day.isCurrentMonth ? 'text-white' : 'text-gray-500'
-                  }`}>
-                    {day.date}
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleDateClick(day);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-white p-1 rounded-md transition-opacity"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
                   </div>
-                  
-                  {/* Tasks for this day */}
-                  <div className="space-y-1">
-                    {dayTasks.slice(0, 3).map(task => (
-                      <div
-                        key={task.id}
-                        className="text-xs p-1 rounded truncate"
-                        style={{ backgroundColor: `${task.color}20`, color: task.color }}
-                      >
-                        {task.title}
-                      </div>
-                    ))}
+
+                  {/* Task Chips */}
+                  <div className="space-y-1 overflow-y-auto max-h-[75px] scrollbar-none">
+                    {dayTasks.slice(0, 3).map(task => {
+                      const proj = task.projectId ? projectMap[task.projectId] : undefined;
+                      const color = proj?.color || '#6366f1';
+                      const isCompleted = task.status === 'completed';
+
+                      return (
+                        <div
+                          key={task.id}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium truncate flex items-center gap-1 border transition-all ${
+                            isCompleted ? 'line-through opacity-50' : ''
+                          }`}
+                          style={{
+                            backgroundColor: `${color}18`,
+                            borderColor: `${color}35`,
+                            color: color,
+                          }}
+                          title={task.title}
+                        >
+                          <span
+                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span className="truncate">{task.title}</span>
+                        </div>
+                      );
+                    })}
+
                     {dayTasks.length > 3 && (
-                      <div className="text-xs text-gray-400">
+                      <div className="text-[10px] text-zinc-400 font-medium px-1">
                         +{dayTasks.length - 3} more
                       </div>
                     )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </motion.div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-        {/* Add Task Modal */}
+      {/* Add Task Modal */}
+      <AnimatePresence>
         {showAddTask && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-[#1a1a1a] rounded-xl border border-white/10 p-6 w-full max-w-md"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="glass-card rounded-3xl border border-white/[0.1] p-6 w-full max-w-md shadow-2xl relative"
             >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold text-white">Add New Task</h3>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                    <CalendarIcon className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Schedule Task</h3>
+                    <p className="text-[11px] text-zinc-400">Date: {selectedDate}</p>
+                  </div>
+                </div>
                 <button
                   onClick={() => setShowAddTask(false)}
-                  className="text-gray-400 hover:text-white"
+                  className="text-zinc-500 hover:text-white p-1 rounded-lg transition-colors"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
               <div className="space-y-4">
-                {/* Task Title */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Task Title
-                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">Task Title</label>
                   <input
                     type="text"
                     value={newTask.title}
-                    onChange={(e) => setNewTask(prev => ({ ...prev, title: e.target.value }))}
-                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter task title"
+                    onChange={e => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+                    className="w-full px-3.5 py-2 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                    placeholder="e.g. Design sprint review"
+                    autoFocus
                   />
                 </div>
 
-                {/* Description */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Description (Optional)
-                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">Description (Optional)</label>
                   <textarea
                     value={newTask.description}
-                    onChange={(e) => setNewTask(prev => ({ ...prev, description: e.target.value }))}
-                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                    rows={3}
-                    placeholder="Enter task description"
+                    onChange={e => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+                    className="w-full px-3.5 py-2 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 resize-none transition-colors"
+                    rows={2}
+                    placeholder="Add any extra details or instructions..."
                   />
                 </div>
 
-                {/* Project */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Project
-                  </label>
-                  <select
-                    value={newTask.projectId}
-                    onChange={(e) => setNewTask(prev => ({ ...prev, projectId: e.target.value }))}
-                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select a project</option>
-                    {projects.filter(p => p.id !== 'all').map(project => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Project</label>
+                    <select
+                      value={newTask.projectId}
+                      onChange={e => setNewTask(prev => ({ ...prev, projectId: e.target.value }))}
+                      className="w-full px-3 py-2 bg-[#121216] border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500/50"
+                    >
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                {/* Priority */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Priority
-                  </label>
-                  <select
-                    value={newTask.priority}
-                    onChange={(e) => setNewTask(prev => ({ ...prev, priority: e.target.value as 'low' | 'medium' | 'high' }))}
-                    className="w-full px-3 py-2 bg-[#222222] border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-
-                {/* Selected Date */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Due Date
-                  </label>
-                  <div className="flex items-center space-x-2 px-3 py-2 bg-[#222222] border border-white/10 rounded-lg">
-                    <CalendarIcon className="h-4 w-4 text-gray-400" />
-                    <span className="text-white">
-                      {new Date(selectedDate).toLocaleDateString()}
-                    </span>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Priority</label>
+                    <select
+                      value={newTask.priority}
+                      onChange={e => setNewTask(prev => ({ ...prev, priority: e.target.value as any }))}
+                      className="w-full px-3 py-2 bg-[#121216] border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500/50"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
                   </div>
                 </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex justify-end space-x-3 mt-6">
-                <Button
-                  variant="ghost"
-                  onClick={() => setShowAddTask(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="default"
-                  onClick={handleAddTask}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
-                      Adding...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4 mr-2" />
-                      Add Task
-                    </>
-                  )}
-                </Button>
+                <div className="flex items-center justify-end gap-2.5 pt-3">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowAddTask(false)}
+                    className="px-4 py-2 text-xs rounded-xl"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={handleAddTask}
+                    className="px-4 py-2 text-xs font-semibold rounded-xl"
+                  >
+                    Schedule Task
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </div>
         )}
-      </div>
+      </AnimatePresence>
     </div>
   );
-} 
+}

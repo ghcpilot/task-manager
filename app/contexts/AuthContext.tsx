@@ -1,28 +1,30 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { 
-  registerUser, 
-  loginUser, 
-  logoutUser, 
-  getUserProfile,
-  UserProfile,
-  signInWithGoogle,
-  sendVerificationEmail,
-  checkEmailVerified
-} from '@/lib/firebaseService';
+import {
+  getCurrentUser as getLocalCurrentUser,
+  authenticateUser,
+  createUser,
+  clearCurrentUser,
+  handleLocalApiRequest,
+  UserAccount,
+} from '@/lib/localDb';
 
 // Define user type
-interface User {
+export interface User {
   id: string;
   name: string;
   email: string;
   role: string;
   avatar?: string;
-  firebaseUser?: FirebaseUser;
-  profile?: UserProfile;
+  profile?: {
+    displayName: string;
+    role: string;
+    photoURL?: string;
+    email: string;
+    createdAt?: { toDate: () => Date };
+    updatedAt?: { toDate: () => Date };
+  };
 }
 
 // Define auth context type
@@ -33,7 +35,6 @@ interface AuthContextType {
   isEmailVerified: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   checkEmailVerification: () => Promise<boolean>;
@@ -45,13 +46,12 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   isLoading: true,
   isAuthenticated: false,
-  isEmailVerified: false,
+  isEmailVerified: true,
   signIn: async () => {},
   signUp: async () => {},
-  signInWithGoogle: async () => {},
   signOut: async () => {},
   sendVerificationEmail: async () => {},
-  checkEmailVerification: async () => false,
+  checkEmailVerification: async () => true,
   error: null,
 });
 
@@ -63,41 +63,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check if the user is authenticated on initial load
+  // Setup client-side fetch interceptor for /api/* requests so all components use localStorage
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        
-        if (firebaseUser) {
-          // User is signed in
-          const userProfile = await getUserProfile(firebaseUser.uid);
-          
-          setUser({
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || userProfile?.displayName || 'User',
-            email: firebaseUser.email || '',
-            role: userProfile?.role || 'user',
-            avatar: firebaseUser.photoURL || userProfile?.photoURL || undefined,
-            firebaseUser,
-            profile: userProfile || undefined
-          });
-        } else {
-          // User is signed out
-          setUser(null);
+    if (typeof window !== 'undefined') {
+      const originalFetch = window.fetch;
+      window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+        let urlStr = '';
+        if (typeof input === 'string') {
+          urlStr = input;
+        } else if (input instanceof URL) {
+          urlStr = input.toString();
+        } else if (input && typeof input === 'object' && 'url' in input) {
+          urlStr = (input as Request).url;
         }
-      } catch (err) {
-        console.error('Authentication error:', err);
-        setUser(null);
-        setError('Authentication failed. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    });
 
-    // Cleanup subscription on unmount
-    return () => unsubscribe();
+        // Intercept relative or localhost /api/* calls
+        if (urlStr.startsWith('/api/') || urlStr.includes('localhost:3000/api/')) {
+          try {
+            const localResp = await handleLocalApiRequest(urlStr, init);
+            if (localResp) {
+              return localResp;
+            }
+          } catch (err) {
+            console.error('Local API intercept error:', err);
+          }
+        }
+
+        return originalFetch.apply(window, [input, init]);
+      };
+    }
+  }, []);
+
+  // Check if user is authenticated from localStorage on initial load
+  useEffect(() => {
+    try {
+      setIsLoading(true);
+      const localUser = getLocalCurrentUser();
+      if (localUser) {
+        setUser({
+          id: localUser.id,
+          name: localUser.name,
+          email: localUser.email,
+          role: localUser.role,
+          avatar: localUser.avatar,
+          profile: {
+            displayName: localUser.name,
+            role: localUser.role,
+            photoURL: localUser.avatar,
+            email: localUser.email,
+            createdAt: { toDate: () => new Date(localUser.createdAt) },
+            updatedAt: { toDate: () => new Date(localUser.updatedAt) },
+          },
+        });
+      } else {
+        setUser(null);
+      }
+    } catch (err) {
+      console.error('Error loading local session:', err);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   // Sign in function
@@ -105,24 +131,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setIsLoading(true);
       setError(null);
-      
-      await loginUser(email, password);
-      // The onAuthStateChanged listener will handle setting the user state
+
+      const authenticated = authenticateUser(email, password);
+      setUser({
+        id: authenticated.id,
+        name: authenticated.name,
+        email: authenticated.email,
+        role: authenticated.role,
+        avatar: authenticated.avatar,
+        profile: {
+          displayName: authenticated.name,
+          role: authenticated.role,
+          photoURL: authenticated.avatar,
+          email: authenticated.email,
+          createdAt: { toDate: () => new Date(authenticated.createdAt) },
+          updatedAt: { toDate: () => new Date(authenticated.updatedAt) },
+        },
+      });
     } catch (err: any) {
       console.error('Sign in error:', err);
-      let errorMessage = 'Invalid email or password. Please try again.';
-      
-      if (err.code === 'auth/user-not-found') {
-        errorMessage = 'No account found with this email address.';
-      } else if (err.code === 'auth/wrong-password') {
-        errorMessage = 'Incorrect password. Please try again.';
-      } else if (err.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address format.';
-      } else if (err.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many failed attempts. Please try again later.';
-      }
-      
-      setError(errorMessage);
+      const message = err.message || 'Invalid email or password. Please try again.';
+      setError(message);
+      throw err;
+    } finally {
       setIsLoading(false);
     }
   };
@@ -132,45 +163,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setIsLoading(true);
       setError(null);
-      
-      await registerUser(email, password, name);
-      // The onAuthStateChanged listener will handle setting the user state
+
+      const newUser = createUser({ name, email, password });
+      authenticateUser(email, password);
+
+      setUser({
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        avatar: newUser.avatar,
+        profile: {
+          displayName: newUser.name,
+          role: newUser.role,
+          photoURL: newUser.avatar,
+          email: newUser.email,
+          createdAt: { toDate: () => new Date(newUser.createdAt) },
+          updatedAt: { toDate: () => new Date(newUser.updatedAt) },
+        },
+      });
     } catch (err: any) {
       console.error('Sign up error:', err);
-      let errorMessage = 'Registration failed. Please try again.';
-      
-      if (err.code === 'auth/email-already-in-use') {
-        errorMessage = 'An account with this email already exists.';
-      } else if (err.code === 'auth/weak-password') {
-        errorMessage = 'Password should be at least 6 characters long.';
-      } else if (err.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address format.';
-      }
-      
-      setError(errorMessage);
-      setIsLoading(false);
-    }
-  };
-
-  // Google sign in function
-  const handleSignInWithGoogle = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      
-      await signInWithGoogle();
-      // The onAuthStateChanged listener will handle setting the user state
-    } catch (err: any) {
-      console.error('Google sign in error:', err);
-      let errorMessage = 'Google sign in failed. Please try again.';
-      
-      if (err.code === 'auth/popup-closed-by-user') {
-        errorMessage = 'Sign in was cancelled.';
-      } else if (err.code === 'auth/popup-blocked') {
-        errorMessage = 'Popup was blocked. Please allow popups and try again.';
-      }
-      
-      setError(errorMessage);
+      const message = err.message || 'Registration failed. Please try again.';
+      setError(message);
+      throw err;
+    } finally {
       setIsLoading(false);
     }
   };
@@ -180,57 +197,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setIsLoading(true);
       setError(null);
-      
-      await logoutUser();
-      // The onAuthStateChanged listener will handle clearing the user state
+      clearCurrentUser();
+      setUser(null);
     } catch (err: any) {
       console.error('Sign out error:', err);
       setError('Sign out failed. Please try again.');
+    } finally {
       setIsLoading(false);
     }
   };
 
-  // Send verification email function
+  // Send verification email function (instant approval for local accounts)
   const handleSendVerificationEmail = async () => {
-    try {
-      if (user?.firebaseUser) {
-        await sendVerificationEmail(user.firebaseUser);
-      }
-    } catch (err: any) {
-      console.error('Send verification email error:', err);
-      setError('Failed to send verification email. Please try again.');
-    }
+    // Local accounts are auto-verified
   };
 
   // Check email verification function
   const handleCheckEmailVerification = async () => {
-    try {
-      if (user?.firebaseUser) {
-        const isVerified = await checkEmailVerified(user.firebaseUser);
-        if (isVerified) {
-          // Update user state to reflect verification
-          setUser(prev => prev ? { ...prev, firebaseUser: { ...prev.firebaseUser!, emailVerified: true } } : null);
-        }
-        return isVerified;
-      }
-      return false;
-    } catch (err: any) {
-      console.error('Check email verification error:', err);
-      return false;
-    }
+    return true;
   };
 
-  // Provide the authentication context
   return (
     <AuthContext.Provider
       value={{
         user,
         isLoading,
         isAuthenticated: !!user,
-        isEmailVerified: !!user?.firebaseUser?.emailVerified,
+        isEmailVerified: true,
         signIn,
         signUp,
-        signInWithGoogle: handleSignInWithGoogle,
         signOut,
         sendVerificationEmail: handleSendVerificationEmail,
         checkEmailVerification: handleCheckEmailVerification,
@@ -240,4 +235,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
     </AuthContext.Provider>
   );
-}; 
+};

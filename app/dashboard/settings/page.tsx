@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Settings,
@@ -9,59 +9,70 @@ import {
   Save,
   Eye,
   EyeOff,
-  FileSpreadsheet,
-  CheckCircle,
+  CheckCircle2,
   Trash2,
   Edit3,
   Mail,
   Key,
   Download,
-  Upload
+  Upload,
+  HardDrive,
+  RefreshCw,
+  Sparkles
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '@/app/contexts/AuthContext';
+import { exportDatabaseJson, importDatabaseJson, resetToDefaultData, STORAGE_KEYS } from '@/lib/localDb';
 
 export default function SettingsPage() {
   const [showPassword, setShowPassword] = useState(false);
   const { user } = useAuth();
-  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [formData, setFormData] = useState({
-    name: user?.name || 'User',
-    email: user?.email || '',
+    name: user?.name || 'Local Developer',
+    email: user?.email || 'user@local.dev',
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   });
 
-  // Update form data when user changes
   useEffect(() => {
     if (user) {
       setFormData(prev => ({
         ...prev,
-        name: user.name || 'User',
-        email: user.email || ''
+        name: user.name || 'Local Developer',
+        email: user.email || 'user@local.dev'
       }));
     }
   }, [user]);
 
-  const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const handleSave = () => {
-    toast.success('Settings saved successfully!');
+  const handleSaveProfile = () => {
+    if (user) {
+      const storedUsers = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+      const updated = storedUsers.map((u: any) => u.id === user.id ? { ...u, name: formData.name } : u);
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updated));
+      const currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER) || '{}');
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ ...currentUser, name: formData.name }));
+    }
+    toast.success('Profile name updated successfully!');
   };
 
   const handlePasswordUpdate = () => {
+    if (!formData.newPassword) {
+      toast.error('Please enter a new password');
+      return;
+    }
     if (formData.newPassword !== formData.confirmPassword) {
       toast.error('New passwords do not match');
       return;
     }
-    toast.success('Password updated successfully!');
+    if (formData.newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    toast.success('Password updated successfully in local storage!');
     setFormData(prev => ({
       ...prev,
       currentPassword: '',
@@ -70,257 +81,259 @@ export default function SettingsPage() {
     }));
   };
 
+  const handleExportData = () => {
+    try {
+      const dataStr = exportDatabaseJson();
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `taskmate_backup_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Database exported successfully!');
+    } catch (err) {
+      toast.error('Failed to export data');
+    }
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const success = importDatabaseJson(content);
+        if (success) {
+          toast.success('Backup imported successfully! Refreshing...');
+          setTimeout(() => window.location.reload(), 800);
+        } else {
+          toast.error('Failed to parse backup JSON');
+        }
+      } catch (err) {
+        toast.error('Invalid backup file');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleResetData = () => {
+    if (confirm('Reset workspace to demo projects and sample tasks? This will recreate sample data.')) {
+      resetToDefaultData();
+      toast.success('Workspace reset to defaults! Reloading...');
+      setTimeout(() => window.location.reload(), 600);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#0a0a0a] light:bg-gray-50 p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mb-8"
+    <div className="min-h-screen p-4 sm:p-6 lg:p-8 space-y-6 max-w-6xl mx-auto">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">Settings</h1>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">
+              Preferences
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+            Manage your account credentials, workspace preferences, and local backups.
+          </p>
+        </div>
+
+        <Button
+          variant="primary"
+          onClick={handleSaveProfile}
+          className="flex items-center gap-2 text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-500/20"
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-white light:text-gray-900 mb-2 flex items-center">
-                <Settings className="h-8 w-8 mr-3" />
-                Settings
-              </h1>
-              <p className="text-gray-400 light:text-gray-600">
-                Manage your account and preferences
-              </p>
+          <Save className="w-4 h-4" />
+          <span>Save Changes</span>
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left: Profile & Database info */}
+        <div className="space-y-6">
+          {/* Profile Card */}
+          <div className="glass-card rounded-3xl p-6 border border-white/[0.08]">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-500 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25">
+                <User className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">{formData.name}</h3>
+                <p className="text-xs text-indigo-400">{formData.email}</p>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-[11px] text-zinc-400">Local Browser Session</span>
+                </div>
+              </div>
             </div>
-            <Button onClick={handleSave} className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700">
-              <Save className="h-4 w-4" />
-              <span>Save All Changes</span>
-            </Button>
-          </div>
-        </motion.div>
 
-        {/* Main Content - Horizontal Layout */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-          {/* Left Column */}
-          <div className="space-y-6">
-            {/* Profile Information Card */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
-              className="bg-[#1a1a1a] light:bg-white border border-white/10 light:border-gray-200 rounded-xl p-6"
-            >
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <User className="w-8 h-8 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-semibold text-white light:text-gray-900">
-                    {formData.name || 'User'}
-                  </h3>
-                  <p className="text-blue-400 light:text-blue-600 text-sm">
-                    {formData.email}
-                  </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">Display Name</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full pl-3.5 pr-10 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  />
+                  <Edit3 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 light:text-gray-700 mb-2">
-                    Full Name
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={formData.name}
-                      onChange={(e) => handleInputChange('name', e.target.value)}
-                      className="w-full px-4 py-3 bg-[#0a0a0a] light:bg-gray-50 border border-white/10 light:border-gray-300 rounded-lg text-white light:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors pr-10"
-                      placeholder="Enter your full name"
-                    />
-                    <Edit3 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">Email Address</label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    value={formData.email}
+                    disabled
+                    className="w-full pl-3.5 pr-10 py-2.5 bg-white/[0.02] border border-white/[0.05] rounded-xl text-xs text-zinc-400 cursor-not-allowed"
+                  />
+                  <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 light:text-gray-700 mb-2">
-                    Email Address
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      value={formData.email}
-                      disabled
-                      className="w-full px-4 py-3 bg-[#0a0a0a] light:bg-gray-100 border border-white/5 light:border-gray-200 rounded-lg text-gray-400 light:text-gray-600 cursor-not-allowed pr-10"
-                      placeholder="Your registered email"
-                    />
-                    <Mail className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                  </div>
-                  <p className="text-xs text-gray-500 light:text-gray-500 mt-1">
-                    Email cannot be changed. Contact support if needed.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Account Status Card */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-              className="bg-[#1a1a1a] light:bg-white border border-white/10 light:border-gray-200 rounded-xl p-6"
-            >
-              <h4 className="text-lg font-medium text-white light:text-gray-900 mb-4 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-green-400" />
-                Account Status
-              </h4>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-center gap-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                  <CheckCircle className="w-5 h-5 text-green-400" />
-                  <div>
-                    <div className="text-white light:text-gray-900 font-medium text-sm">Email Verified</div>
-                    <div className="text-green-400 text-xs">Active</div>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                  <CheckCircle className="w-5 h-5 text-blue-400" />
-                  <div>
-                    <div className="text-white light:text-gray-900 font-medium text-sm">Account Active</div>
-                    <div className="text-blue-400 text-xs">Verified</div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-
-          {/* Right Column */}
-          <div className="space-y-6">
-            {/* Security Card */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
-              className="bg-[#1a1a1a] light:bg-white border border-white/10 light:border-gray-200 rounded-xl p-6"
-            >
-              <h4 className="text-lg font-medium text-white light:text-gray-900 mb-4 flex items-center gap-2">
-                <Key className="w-5 h-5 text-yellow-400" />
-                Security Settings
-              </h4>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 light:text-gray-700 mb-2">
-                    Current Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={formData.currentPassword}
-                      onChange={(e) => handleInputChange('currentPassword', e.target.value)}
-                      className="w-full px-4 py-3 bg-[#0a0a0a] light:bg-gray-50 border border-white/10 light:border-gray-300 rounded-lg text-white light:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors pr-10"
-                      placeholder="Enter current password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 light:text-gray-700 mb-2">
-                      New Password
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.newPassword}
-                      onChange={(e) => handleInputChange('newPassword', e.target.value)}
-                      className="w-full px-4 py-3 bg-[#0a0a0a] light:bg-gray-50 border border-white/10 light:border-gray-300 rounded-lg text-white light:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                      placeholder="New password"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 light:text-gray-700 mb-2">
-                      Confirm Password
-                    </label>
-                    <input
-                      type="password"
-                      value={formData.confirmPassword}
-                      onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                      className="w-full px-4 py-3 bg-[#0a0a0a] light:bg-gray-50 border border-white/10 light:border-gray-300 rounded-lg text-white light:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                      placeholder="Confirm password"
-                    />
-                  </div>
-                </div>
-                
-                <Button 
-                  onClick={handlePasswordUpdate}
-                  variant="outline" 
-                  className="w-full border-yellow-500/20 text-yellow-400 hover:bg-yellow-500/10"
-                >
-                  <Key className="w-4 h-4 mr-2" />
-                  Update Password
-                </Button>
-              </div>
-            </motion.div>
-
-            {/* Data & Actions Card */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
-              className="bg-[#1a1a1a] light:bg-white border border-white/10 light:border-gray-200 rounded-xl p-6"
-            >
-              <h4 className="text-lg font-medium text-white light:text-gray-900 mb-4 flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-purple-400" />
-                Data & Privacy
-              </h4>
-              
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <Button 
-                  variant="outline" 
-                  className="w-full border-blue-500/20 text-blue-400 hover:bg-blue-500/10"
-                  onClick={() => toast.success('Data export initiated. You will receive an email shortly.')}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Export Data
-                </Button>
-                
-                <Button 
-                  variant="outline" 
-                  className="w-full border-green-500/20 text-green-400 hover:bg-green-500/10"
-                  onClick={() => toast.success('Account backup created successfully.')}
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  Backup Account
-                </Button>
-              </div>
-              
-              <div className="border-t border-white/10 light:border-gray-200 pt-4">
-                <Button 
-                  variant="outline" 
-                  className="w-full border-red-500/20 text-red-400 hover:bg-red-500/10"
-                  onClick={() => {
-                    if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-                      toast.error('Account deletion requested. Please check your email to confirm.');
-                    }
-                  }}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete Account
-                </Button>
-                <p className="text-xs text-gray-500 light:text-gray-500 mt-2 text-center">
-                  This action is permanent and cannot be undone
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Email identifier is bound to your local account profile.
                 </p>
               </div>
-            </motion.div>
+            </div>
+          </div>
+
+          {/* Account Status */}
+          <div className="glass-card rounded-3xl p-6 border border-white/[0.08]">
+            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-emerald-400" />
+              Security & Environment
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3 rounded-2xl bg-emerald-500/5 border border-emerald-500/15 flex items-center gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-white">Status: Active</div>
+                  <div className="text-[10px] text-emerald-400">Authenticated locally</div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-indigo-500/5 border border-indigo-500/15 flex items-center gap-2.5">
+                <HardDrive className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-white">Storage: Local DB</div>
+                  <div className="text-[10px] text-indigo-400">Browser localStorage</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Security & Backup/Restore */}
+        <div className="space-y-6">
+          {/* Password update */}
+          <div className="glass-card rounded-3xl p-6 border border-white/[0.08]">
+            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+              <Key className="w-4 h-4 text-amber-400" />
+              Change Password
+            </h4>
+
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">New Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.newPassword}
+                    onChange={e => setFormData(prev => ({ ...prev, newPassword: e.target.value }))}
+                    placeholder="Enter new password (min 6 characters)"
+                    className="w-full pl-3.5 pr-10 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">Confirm New Password</label>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={formData.confirmPassword}
+                  onChange={e => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  placeholder="Repeat new password"
+                  className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              </div>
+
+              <Button
+                variant="secondary"
+                onClick={handlePasswordUpdate}
+                className="w-full text-xs font-semibold py-2.5 rounded-xl border-white/[0.08]"
+              >
+                Update Password
+              </Button>
+            </div>
+          </div>
+
+          {/* Backup & Restore Data */}
+          <div className="glass-card rounded-3xl p-6 border border-white/[0.08]">
+            <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+              <Download className="w-4 h-4 text-indigo-400" />
+              Workspace Data & Backup
+            </h4>
+            <p className="text-xs text-zinc-400 mb-4">
+              Export all projects, tasks, and time entries as a JSON file or restore a previous snapshot.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <Button
+                variant="secondary"
+                onClick={handleExportData}
+                className="text-xs font-medium py-2.5 rounded-xl flex items-center justify-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Export JSON</span>
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs font-medium py-2.5 rounded-xl flex items-center justify-center gap-1.5"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Import JSON</span>
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportData}
+                className="hidden"
+              />
+            </div>
+
+            <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between">
+              <span className="text-[11px] text-zinc-500">Need sample data?</span>
+              <button
+                onClick={handleResetData}
+                className="text-[11px] text-zinc-400 hover:text-rose-400 transition-colors flex items-center gap-1"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Reset to demo data</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
-} 
+}

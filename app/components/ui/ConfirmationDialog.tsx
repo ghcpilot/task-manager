@@ -6,30 +6,43 @@ import Button from './Button';
 
 interface ConfirmationDialogProps {
   isOpen: boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  onCancel?: () => void;
   onConfirm: () => void;
   title: string;
   message: string;
   confirmText?: string;
+  confirmLabel?: string;
   cancelText?: string;
+  cancelLabel?: string;
   variant?: 'danger' | 'warning' | 'info';
+  confirmVariant?: string;
 }
 
 export default function ConfirmationDialog({
   isOpen,
   onClose,
+  onCancel,
   onConfirm,
   title,
   message,
-  confirmText = 'Confirm',
-  cancelText = 'Cancel',
-  variant = 'danger'
+  confirmText,
+  confirmLabel,
+  cancelText,
+  cancelLabel,
+  variant,
+  confirmVariant
 }: ConfirmationDialogProps) {
   if (!isOpen) return null;
 
+  const closeDialog = onClose || onCancel || (() => {});
+  const effectiveConfirmText = confirmLabel || confirmText || 'Confirm';
+  const effectiveCancelText = cancelLabel || cancelText || 'Cancel';
+  const effectiveVariant = variant || (confirmVariant === 'destructive' ? 'danger' : 'danger');
+
   const handleConfirm = () => {
     onConfirm();
-    onClose();
+    closeDialog();
   };
 
   const getVariantStyles = () => {
@@ -75,7 +88,7 @@ export default function ConfirmationDialog({
             <h2 className="text-lg font-semibold text-white">{title}</h2>
           </div>
           <button
-            onClick={onClose}
+            onClick={closeDialog}
             className="text-gray-400 hover:text-white transition-colors"
           >
             <X className="h-5 w-5" />
@@ -89,15 +102,15 @@ export default function ConfirmationDialog({
         <div className="flex justify-end space-x-3">
           <Button
             variant="ghost"
-            onClick={onClose}
+            onClick={closeDialog}
           >
-            {cancelText}
+            {effectiveCancelText}
           </Button>
           <button
             onClick={handleConfirm}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${confirmButtonClass}`}
           >
-            {confirmText}
+            {effectiveConfirmText}
           </button>
         </div>
       </motion.div>

@@ -1,4 +1,8 @@
-import { auth } from './firebase';
+import {
+  getCurrentUser as getLocalCurrentUser,
+  clearCurrentUser,
+  handleLocalApiRequest,
+} from './localDb';
 
 // Auth utility functions
 export interface AuthUser {
@@ -6,21 +10,23 @@ export interface AuthUser {
   name: string;
   email: string;
   role: string;
+  avatar?: string;
 }
 
-// Helper function to get user from Firebase Auth (client-side only)
-export async function getAuthUser() {
+// Helper function to get user from local storage (client-side only)
+export async function getAuthUser(): Promise<AuthUser | null> {
   try {
-    const user = auth.currentUser;
+    const user = getLocalCurrentUser();
     if (!user) {
       return null;
     }
-    
+
     return {
-      id: user.uid,
-      name: user.displayName || 'User',
+      id: user.id,
+      name: user.name || 'User',
       email: user.email || '',
-      role: 'user'
+      role: user.role || 'user',
+      avatar: user.avatar,
     };
   } catch (error) {
     console.error('Auth error:', error);
@@ -28,15 +34,14 @@ export async function getAuthUser() {
   }
 }
 
-// Get Firebase ID token for API requests
+// Get ID token for API requests
 export async function getIdToken(): Promise<string | null> {
   try {
-    const user = auth.currentUser;
+    const user = getLocalCurrentUser();
     if (!user) {
       return null;
     }
-    
-    return await user.getIdToken();
+    return `local_token_${user.id}`;
   } catch (error) {
     console.error('Failed to get ID token:', error);
     return null;
@@ -44,19 +49,23 @@ export async function getIdToken(): Promise<string | null> {
 }
 
 // Enhanced authenticated fetch function
-export async function authenticatedFetch(url: string, options: RequestInit = {}) {
-  const token = await getIdToken();
-  
-  if (!token) {
-    throw new Error('No authentication token available');
+// Routes directly to localStorage via handleLocalApiRequest when running in browser
+export async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  // If running in browser and targeting an /api route, handle via localStorage
+  if (typeof window !== 'undefined' && url.startsWith('/api/')) {
+    const localResponse = await handleLocalApiRequest(url, options);
+    if (localResponse) {
+      return localResponse;
+    }
   }
-  
+
+  const token = await getIdToken();
   const headers = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
-  
+
   return fetch(url, {
     ...options,
     headers,
@@ -64,7 +73,7 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
 }
 
 // Session management functions (client-side)
-export async function getSession() {
+export async function getSession(): Promise<AuthUser | null> {
   return getAuthUser();
 }
 
@@ -73,15 +82,15 @@ export async function isAuthenticated(): Promise<boolean> {
   return user !== null;
 }
 
-export async function getCurrentUser() {
+export async function getCurrentUser(): Promise<AuthUser | null> {
   return getAuthUser();
 }
 
-export async function signOut() {
+export async function signOut(): Promise<void> {
   try {
-    await auth.signOut();
+    clearCurrentUser();
   } catch (error) {
     console.error('Sign out error:', error);
     throw error;
   }
-} 
+}

@@ -6,16 +6,31 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 
 if (!getApps().length) {
-  initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-  });
+  try {
+    if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+      initializeApp({
+        credential: cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }),
+      });
+    } else {
+      initializeApp({
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'task-mates-1a798',
+      });
+    }
+  } catch (e) {
+    console.warn('Firebase Admin init warning:', e);
+  }
 }
 
-const db = getFirestore();
+let db: FirebaseFirestore.Firestore | null = null;
+try {
+  db = getFirestore();
+} catch (e) {
+  console.warn('Firestore init warning:', e);
+}
 
 interface ExternalSheet {
   id: string;
@@ -39,6 +54,10 @@ export async function GET(request: NextRequest) {
     const token = authHeader.split(' ')[1];
     const decodedToken = await getAuth().verifyIdToken(token);
     const userId = decodedToken.uid;
+
+    if (!db) {
+      return NextResponse.json(null);
+    }
 
     const sheetRef = db.collection('external-sheets');
     const snapshot = await sheetRef.where('userId', '==', userId).limit(1).get();
@@ -92,6 +111,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already has an external sheet configured
+    if (!db) {
+      return NextResponse.json({ error: 'Firestore not configured' }, { status: 503 });
+    }
+
     const existingSnapshot = await db.collection('external-sheets')
       .where('userId', '==', userId)
       .limit(1)
@@ -150,6 +173,10 @@ export async function DELETE(request: NextRequest) {
     const token = authHeader.split(' ')[1];
     const decodedToken = await getAuth().verifyIdToken(token);
     const userId = decodedToken.uid;
+
+    if (!db) {
+      return NextResponse.json({ error: 'Firestore not configured' }, { status: 503 });
+    }
 
     const snapshot = await db.collection('external-sheets')
       .where('userId', '==', userId)

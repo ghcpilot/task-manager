@@ -8,8 +8,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'react-hot-toast';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { getUserByEmail } from '@/lib/localDb';
 import Button from '@/components/ui/Button';
 
 // Form validation schema
@@ -33,26 +32,16 @@ export default function ForgotPasswordPage() {
   
   const onSubmit = async (data: ForgotPasswordFormData) => {
     try {
-      await sendPasswordResetEmail(auth, data.email);
+      const user = getUserByEmail(data.email);
+      if (!user) {
+        toast.error('No account found with this email address');
+        return;
+      }
       setIsSubmitted(true);
-      toast.success('Password reset email sent successfully');
+      toast.success('Password reset instructions generated');
     } catch (error: any) {
       console.error('Password reset error:', error);
-      
-      // Handle specific Firebase errors
-      switch (error.code) {
-        case 'auth/user-not-found':
-          toast.error('No account found with this email address');
-          break;
-        case 'auth/invalid-email':
-          toast.error('Invalid email address');
-          break;
-        case 'auth/too-many-requests':
-          toast.error('Too many requests. Please try again later');
-          break;
-        default:
-          toast.error('Failed to send password reset email. Please try again');
-      }
+      toast.error('Failed to process password reset. Please try again');
     }
   };
   

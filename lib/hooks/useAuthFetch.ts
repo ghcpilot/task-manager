@@ -30,7 +30,7 @@ export function useAuthFetch<T = any>(): UseFetchResult<T> {
       if (!authenticated) {
         toast.error('Your session has expired. Please log in again.');
         await signOut();
-        router.push('/login');
+        router.push('/auth/login');
         return null;
       }
 
@@ -50,7 +50,7 @@ export function useAuthFetch<T = any>(): UseFetchResult<T> {
       if (response.status === 401) {
         toast.error('Your session has expired. Please log in again.');
         await signOut();
-        router.push('/login');
+        router.push('/auth/login');
         return null;
       }
 

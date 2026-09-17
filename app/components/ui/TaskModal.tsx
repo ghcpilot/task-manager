@@ -19,12 +19,13 @@ interface Task {
 interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (task: Partial<Task>) => void;
+  onSave?: (task: Partial<Task>) => void;
+  onAddTask?: (task: any) => void;
   task?: Task;
-  mode: 'create' | 'edit' | 'view';
+  mode?: 'create' | 'edit' | 'view';
 }
 
-export default function TaskModal({ isOpen, onClose, onSave, task, mode }: TaskModalProps) {
+export default function TaskModal({ isOpen, onClose, onSave, onAddTask, task, mode = 'create' }: TaskModalProps) {
   const [formData, setFormData] = useState<Partial<Task>>({
     title: '',
     description: '',
@@ -53,7 +54,11 @@ export default function TaskModal({ isOpen, onClose, onSave, task, mode }: TaskM
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
+    if (onSave) {
+      onSave(formData);
+    } else if (onAddTask) {
+      onAddTask(formData);
+    }
     onClose();
   };
 

@@ -478,38 +478,39 @@ export default function ProjectsPage() {
   }
   
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a0a0a] via-[#111111] to-[#0a0a0a] p-4 sm:p-6">
-      <div className="max-w-[2000px] mx-auto">
+    <div className="min-h-screen bg-[#09090b] light:bg-slate-50 p-4 sm:p-6">
+      <div className="max-w-[2000px] mx-auto space-y-6">
         {/* Enhanced Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          transition={{ duration: 0.4 }}
           className="mb-6 sm:mb-8"
         >
-          <div className="bg-gradient-to-r from-blue-600/10 via-purple-600/5 to-pink-600/10 border border-white/10 rounded-xl sm:rounded-2xl p-4 sm:p-8 backdrop-blur-sm">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 sm:gap-6">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-14 sm:h-14 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg">
-                  <FolderKanban className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
+          <div className="glass-card rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-white/[0.08] shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 -mt-10 -mr-10 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 sm:gap-6">
+              <div className="flex items-center gap-3.5 sm:gap-4">
+                <div className="w-11 h-11 sm:w-13 sm:h-13 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/25 flex-shrink-0">
+                  <FolderKanban className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1">Projects</h1>
-                  <p className="text-sm sm:text-base text-gray-300">Manage your projects and track progress</p>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-white light:text-slate-900 tracking-tight">Projects</h1>
+                  <p className="text-xs sm:text-sm text-zinc-400 light:text-slate-500">Organize your workflow and track milestone progress</p>
                 </div>
               </div>
               
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                {/* Enhanced Search & Filters */}
+                {/* Search & Filters */}
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-500" />
                     <input
                       type="text"
                       placeholder="Search projects & tasks..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10 pr-4 py-2 sm:py-3 bg-white/5 border border-white/10 rounded-lg sm:rounded-xl text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all w-full sm:w-80 text-sm sm:text-base"
+                      className="pl-9 pr-4 py-2 bg-white/[0.04] light:bg-slate-100 border border-white/[0.08] light:border-slate-200 rounded-xl text-xs text-white light:text-slate-900 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500/50 transition-all w-full sm:w-72"
                     />
                   </div>
                   
@@ -518,47 +519,49 @@ export default function ProjectsPage() {
                     <select
                       value={filterStatus}
                       onChange={(e) => setFilterStatus(e.target.value)}
-                      className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="px-3 py-2 bg-white/[0.04] light:bg-slate-100 border border-white/[0.08] light:border-slate-200 rounded-xl text-zinc-300 light:text-slate-800 text-xs focus:outline-none focus:border-indigo-500/50"
                     >
-                      <option value="all">All Status</option>
-                      <option value="pending">To Do</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="completed">Completed</option>
+                      <option value="all" className="bg-[#121216]">All Status</option>
+                      <option value="pending" className="bg-[#121216]">To Do</option>
+                      <option value="in_progress" className="bg-[#121216]">In Progress</option>
+                      <option value="completed" className="bg-[#121216]">Completed</option>
                     </select>
                     
                     <select
                       value={filterPriority}
                       onChange={(e) => setFilterPriority(e.target.value)}
-                      className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="px-3 py-2 bg-white/[0.04] light:bg-slate-100 border border-white/[0.08] light:border-slate-200 rounded-xl text-zinc-300 light:text-slate-800 text-xs focus:outline-none focus:border-indigo-500/50"
                     >
-                      <option value="all">All Priority</option>
-                      <option value="high">High</option>
-                      <option value="medium">Medium</option>
-                      <option value="low">Low</option>
+                      <option value="all" className="bg-[#121216]">All Priority</option>
+                      <option value="high" className="bg-[#121216]">High</option>
+                      <option value="medium" className="bg-[#121216]">Medium</option>
+                      <option value="low" className="bg-[#121216]">Low</option>
                     </select>
                   </div>
                 </div>
                 
                 <div className="flex gap-2 sm:gap-3">
                   {/* View Mode Toggle */}
-                  <div className="flex bg-white/5 border border-white/10 rounded-lg p-1">
+                  <div className="flex bg-black/30 p-1 rounded-xl border border-white/[0.06]">
                     <button
                       onClick={() => setViewMode('kanban')}
-                      className={`p-2 rounded text-sm font-medium transition-all ${
+                      className={`p-1.5 rounded-lg text-xs font-medium transition-all ${
                         viewMode === 'kanban' 
-                          ? 'bg-blue-500 text-white' 
-                          : 'text-gray-400 hover:text-white'
+                          ? 'bg-indigo-600 text-white shadow-sm' 
+                          : 'text-zinc-400 hover:text-white'
                       }`}
+                      title="Kanban Board View"
                     >
                       <Layout className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => setViewMode('list')}
-                      className={`p-2 rounded text-sm font-medium transition-all ${
+                      className={`p-1.5 rounded-lg text-xs font-medium transition-all ${
                         viewMode === 'list' 
-                          ? 'bg-blue-500 text-white' 
-                          : 'text-gray-400 hover:text-white'
+                          ? 'bg-indigo-600 text-white shadow-sm' 
+                          : 'text-zinc-400 hover:text-white'
                       }`}
+                      title="List View"
                     >
                       <SortDesc className="w-4 h-4" />
                     </button>
@@ -566,9 +569,9 @@ export default function ProjectsPage() {
                   
                   <Button
                     onClick={() => router.push('/dashboard/projects/new')}
-                    className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl text-sm sm:text-base"
+                    className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-md shadow-indigo-500/25 transition-all"
                   >
-                    <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <Plus className="w-4 h-4" />
                     <span className="hidden sm:inline">New Project</span>
                     <span className="sm:hidden">New</span>
                   </Button>
